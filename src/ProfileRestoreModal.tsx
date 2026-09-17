@@ -1,10 +1,11 @@
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, FileKey2, ShieldCheck, Upload, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Download, FileKey2, LogIn, ShieldCheck, Upload, X } from 'lucide-react'
 import {
   decryptSnapshot,
   downloadSnapshot,
   encryptSnapshot,
   ensurePersistentBrowser,
+  queueLoginAssist,
   queuePortableState,
   type PortableBrowserState,
   type ProfileSnapshot,
@@ -47,7 +48,7 @@ type Props = {
 }
 
 export default function ProfileRestoreModal({ profiles, imports, initialProfileId, onClose, onRestored }: Props) {
-  const [mode, setMode] = useState<'export' | 'restore'>('export')
+  const [mode, setMode] = useState<'login' | 'export' | 'restore'>('login')
   const [profileId, setProfileId] = useState(initialProfileId || profiles[0]?.id || '')
   const [startUrl, setStartUrl] = useState('https://www.tiktok.com/')
   const [passphrase, setPassphrase] = useState('')
@@ -66,6 +67,19 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     if (imported?.url) setStartUrl(imported.url)
     setMessage('')
     setError('')
+  }
+
+  const loginAssist = (event: FormEvent) => {
+    event.preventDefault()
+    if (!profileId) return
+    setError('')
+    setMessage('')
+    try {
+      const queued = queueLoginAssist(profileId, startUrl)
+      setMessage(`Navegador persistente preparado. Comando de abertura adicionado à fila do worker (${queued} pendente${queued === 1 ? '' : 's'}).`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível preparar o login assistido.')
+    }
   }
 
   const exportProfile = async (event: FormEvent) => {
@@ -159,7 +173,8 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
       <button className="icon-button" onClick={onClose}><X size={20}/></button>
     </div>
 
-    <div style={{padding:'0 24px 14px', display:'flex', gap:8}}>
+    <div style={{padding:'0 24px 14px', display:'flex', gap:8, flexWrap:'wrap'}}>
+      <button type="button" className={mode === 'login' ? 'primary' : 'secondary'} onClick={() => { setMode('login'); setError(''); setMessage('') }}><LogIn size={16}/> Login assistido</button>
       <button type="button" className={mode === 'export' ? 'primary' : 'secondary'} onClick={() => { setMode('export'); setError(''); setMessage('') }}><Download size={16}/> Exportar snapshot</button>
       <button type="button" className={mode === 'restore' ? 'primary' : 'secondary'} onClick={() => { setMode('restore'); setError(''); setMessage('') }}><Upload size={16}/> Restaurar snapshot</button>
     </div>
@@ -168,7 +183,18 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
       <div className="info-box" style={{margin:0}}><ShieldCheck size={19}/><span><strong>Persistência por perfil</strong><small>O worker usa um diretório Chromium fixo e isolado por perfil. Depois do login normal, o estado desse navegador permanece entre reinicializações. O arquivo exportável contém apenas configuração e dados portáveis filtrados.</small></span></div>
     </div>
 
-    {mode === 'export' ? <form onSubmit={exportProfile}>
+    {mode === 'login' && <form onSubmit={loginAssist}>
+      <div className="form-grid">
+        <label>Perfil<select value={profileId} onChange={e => changeProfile(e.target.value)}>{profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>
+        <label>Site para abrir<input value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://www.tiktok.com/"/></label>
+        <div className="review-row full"><span>Diretório persistente</span><strong>{profileId ? `/var/lib/nexo/profiles/${profileId}/chromium` : 'Selecione um perfil'}</strong></div>
+        <div className="warning full"><AlertTriangle size={18}/><span>O primeiro acesso é autenticado normalmente pelo usuário. Depois, o worker reabre o mesmo perfil Chromium e preserva o estado criado dentro daquele ambiente.</span></div>
+      </div>
+      {error && <Result tone="error" text={error}/>} {message && <Result tone="success" text={message}/>} 
+      <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={!profileId}><LogIn size={16}/> Preparar e abrir</button></div>
+    </form>}
+
+    {mode === 'export' && <form onSubmit={exportProfile}>
       <div className="form-grid">
         <label>Perfil<select value={profileId} onChange={e => changeProfile(e.target.value)}>{profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>
         <label>URL inicial<input value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://www.tiktok.com/"/></label>
@@ -177,7 +203,9 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
       </div>
       {error && <Result tone="error" text={error}/>} {message && <Result tone="success" text={message}/>} 
       <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={busy || !profileId}>{busy ? 'Criptografando…' : <><FileKey2 size={16}/> Criar snapshot</>}</button></div>
-    </form> : <form onSubmit={restoreProfile}>
+    </form>}
+
+    {mode === 'restore' && <form onSubmit={restoreProfile}>
       <div className="form-grid">
         <label className="full">Perfil de destino<select value={profileId} onChange={e => changeProfile(e.target.value)}>{profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>
         <label className="full" style={{display:'flex', alignItems:'center', justifyContent:'center', gap:10, minHeight:80, border:'1px dashed #31506d', borderRadius:10, background:'#0c1d2f', cursor:'pointer'}}>
