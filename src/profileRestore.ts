@@ -88,17 +88,23 @@ function base64ToBytes(value: string) {
   return Uint8Array.from(binary, char => char.charCodeAt(0))
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength)
+  copy.set(bytes)
+  return copy.buffer
+}
+
 async function deriveKey(passphrase: string, salt: Uint8Array, iterations: number) {
   const material = await crypto.subtle.importKey(
     'raw',
-    new TextEncoder().encode(passphrase),
+    toArrayBuffer(new TextEncoder().encode(passphrase)),
     'PBKDF2',
     false,
     ['deriveKey'],
   )
 
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', hash: 'SHA-256', salt, iterations },
+    { name: 'PBKDF2', hash: 'SHA-256', salt: toArrayBuffer(salt), iterations },
     material,
     { name: 'AES-GCM', length: 256 },
     false,
@@ -133,7 +139,11 @@ export async function encryptSnapshot(snapshot: ProfileSnapshot, passphrase: str
   const iterations = 180_000
   const key = await deriveKey(passphrase, salt, iterations)
   const encoded = new TextEncoder().encode(JSON.stringify(snapshot))
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded)
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+    key,
+    toArrayBuffer(encoded),
+  )
 
   const envelope: EncryptedSnapshot = {
     version: 1,
@@ -165,7 +175,11 @@ export async function decryptSnapshot(raw: string, passphrase: string): Promise<
 
   let clear: ArrayBuffer
   try {
-    clear = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data)
+    clear = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toArrayBuffer(iv) },
+      key,
+      toArrayBuffer(data),
+    )
   } catch {
     throw new Error('Senha incorreta ou snapshot corrompido.')
   }
