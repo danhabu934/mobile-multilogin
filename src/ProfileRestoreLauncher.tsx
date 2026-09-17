@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DatabaseBackup, RadioTower } from 'lucide-react'
 import ProfileRestoreModal, { type RestoredProfileState } from './ProfileRestoreModal'
 
@@ -41,24 +41,27 @@ function readJson<T>(key: string, fallback: T): T {
 
 export default function ProfileRestoreLauncher() {
   const [open, setOpen] = useState(false)
-  const [version, setVersion] = useState(0)
+  const [profiles, setProfiles] = useState(() => readJson<StoredProfile[]>('nexo-profiles', []))
+  const [imports, setImports] = useState(() => readJson<StoredImport[]>('nexo-safe-imports', []))
   const [queueCount, setQueueCount] = useState(() => readJson<unknown[]>('nexo-worker-command-queue', []).length)
 
   useEffect(() => {
     const refresh = () => {
-      setVersion(value => value + 1)
+      setProfiles(readJson<StoredProfile[]>('nexo-profiles', []))
+      setImports(readJson<StoredImport[]>('nexo-safe-imports', []))
       setQueueCount(readJson<unknown[]>('nexo-worker-command-queue', []).length)
     }
+
+    refresh()
+    const timer = window.setInterval(refresh, 1200)
     window.addEventListener('storage', refresh)
     window.addEventListener('nexo-worker-queue-changed', refresh as EventListener)
     return () => {
+      window.clearInterval(timer)
       window.removeEventListener('storage', refresh)
       window.removeEventListener('nexo-worker-queue-changed', refresh as EventListener)
     }
   }, [])
-
-  const profiles = useMemo(() => readJson<StoredProfile[]>('nexo-profiles', []), [version, open])
-  const imports = useMemo(() => readJson<StoredImport[]>('nexo-safe-imports', []), [version, open])
 
   const persistRestored = (restored: RestoredProfileState) => {
     const next: StoredImport = {
@@ -75,8 +78,9 @@ export default function ProfileRestoreLauncher() {
       payload: restored.payload,
     }
     const current = readJson<StoredImport[]>('nexo-safe-imports', [])
-    localStorage.setItem('nexo-safe-imports', JSON.stringify([next, ...current].slice(0, 50)))
-    setVersion(value => value + 1)
+    const updated = [next, ...current].slice(0, 50)
+    localStorage.setItem('nexo-safe-imports', JSON.stringify(updated))
+    setImports(updated)
   }
 
   if (!profiles.length) return null
