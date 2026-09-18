@@ -21,7 +21,7 @@ O painel não executa Android dentro da Vercel. Inicialização, Play Store, ins
 
 O primeiro Android Worker está em [`worker/`](worker/README.md). Ele possui API autenticada, persistência por perfil, criação de AVD com imagem Google Play, controle de início/parada e verificação dos requisitos KVM.
 
-Para preparar o host no Google Cloud com Terraform, consulte [`infra/gcp/`](infra/gcp/README.md). A configuração usa uma VM Intel N2 com virtualização aninhada, mantém a API do worker ligada somente ao localhost e restringe o SSH ao Google IAP.
+O caminho recomendado atual é o Microsoft Azure: consulte [`infra/azure/`](infra/azure/README.md). A configuração usa uma VM D4s v3 com virtualização aninhada, mantém a API do worker ligada somente ao localhost e restringe o SSH ao IP do administrador. A configuração anterior do Google Cloud permanece em [`infra/gcp/`](infra/gcp/README.md) apenas como alternativa.
 
 ## Segurança
 
