@@ -19,6 +19,8 @@ npm run dev
 
 O painel não executa Android dentro da Vercel. Inicialização, Play Store, instalação de APK, snapshots e streaming dependem de um worker compatível.
 
+O primeiro Android Worker está em [`worker/`](worker/README.md). Ele possui API autenticada, persistência por perfil, criação de AVD com imagem Google Play, controle de início/parada e verificação dos requisitos KVM.
+
 ## Segurança
 
 - Não versionar proxies, senhas, cookies ou tokens.
