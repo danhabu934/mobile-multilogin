@@ -1,0 +1,23 @@
+[Unit]
+Description=Nexo Android Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nexo
+Group=nexo
+WorkingDirectory=/opt/nexo-mobile/worker
+EnvironmentFile=/etc/nexo-mobile/worker.env
+ExecStart=/usr/bin/node /opt/nexo-mobile/worker/dist/server.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/nexo-mobile
+DeviceAllow=/dev/kvm rw
+
+[Install]
+WantedBy=multi-user.target
