@@ -28,11 +28,30 @@ export class AndroidManager {
   }
 
   async capabilities() {
-    const kvm = fs.existsSync('/dev/kvm')
+    const kvm = this.config.platform === 'linux' && fs.existsSync('/dev/kvm')
     const emulator = fs.existsSync(this.config.emulatorPath)
     const adb = fs.existsSync(this.config.adbPath)
     const avdManager = fs.existsSync(this.config.avdManagerPath)
-    return { kvm, emulator, adb, avdManager, dryRun: this.config.dryRun, ready: this.config.dryRun || (kvm && emulator && adb && avdManager) }
+    let acceleration = kvm
+    let accelerationDetails = kvm ? '/dev/kvm' : 'unavailable'
+
+    if (this.config.platform === 'win32' && emulator) {
+      const result = spawnSync(this.config.emulatorPath, ['-accel-check'], { timeout: 15_000, encoding: 'utf8' })
+      acceleration = result.status === 0
+      accelerationDetails = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim() || `exit ${result.status}`
+    }
+
+    return {
+      platform: this.config.platform,
+      acceleration,
+      accelerationDetails,
+      kvm,
+      emulator,
+      adb,
+      avdManager,
+      dryRun: this.config.dryRun,
+      ready: this.config.dryRun || (acceleration && emulator && adb && avdManager),
+    }
   }
 
   async create(input: { id: string; displayName: string; proxy: ProxyConfig }) {
@@ -71,7 +90,7 @@ export class AndroidManager {
     if ((await this.refresh(profile)).status === 'running') return this.sanitize(profile)
 
     const capabilities = await this.capabilities()
-    if (!capabilities.ready) throw new Error('Worker is missing KVM or Android SDK components')
+    if (!capabilities.ready) throw new Error('Worker is missing hardware acceleration or Android SDK components')
     if (profile.proxy.type === 'socks5') throw new Error('SOCKS5 requires the network tunnel module and is not enabled in this worker version')
 
     profile.status = 'starting'
@@ -82,12 +101,11 @@ export class AndroidManager {
     const args = [
       '-avd', profile.avdName,
       '-port', String(profile.emulatorPort),
-      '-no-window',
-      '-no-audio',
       '-no-boot-anim',
-      '-gpu', 'swiftshader_indirect',
+      '-gpu', this.config.emulatorGpu,
       '-accel', 'on',
     ]
+    if (this.config.headless) args.push('-no-window', '-no-audio')
     const proxy = this.proxyArgument(profile.proxy)
     if (proxy) args.push('-http-proxy', proxy)
 
@@ -139,6 +157,7 @@ export class AndroidManager {
       input: 'no\n',
       encoding: 'utf8',
       timeout: 120_000,
+      shell: this.config.platform === 'win32',
       env: { ...process.env, ANDROID_AVD_HOME: this.config.avdHome, ANDROID_SDK_ROOT: this.config.sdkRoot },
     })
     if (result.status !== 0) throw new Error(`AVD creation failed: ${result.stderr || result.stdout}`)
