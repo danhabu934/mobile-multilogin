@@ -1,6 +1,11 @@
 node_modules
 dist
 .env
+worker/.env
+worker/dist
+worker/node_modules
+.nexo-data
 .env.*
 !.env.example
+!worker/.env.example
 .DS_Store
