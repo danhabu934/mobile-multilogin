@@ -1,0 +1,58 @@
+# Nexo Android Worker
+
+Serviço Linux responsável por criar e executar os Android Virtual Devices. O painel da Vercel não executa Android diretamente; ele envia comandos autenticados para este worker.
+
+## Requisitos do host
+
+- Ubuntu/Debian x86_64 com virtualização aninhada habilitada.
+- `/dev/kvm` disponível para o usuário do serviço.
+- Node.js 22 ou superior.
+- Android command-line tools, Emulator e Platform Tools em `ANDROID_SDK_ROOT`.
+- Imagem `system-images;android-34;google_apis_playstore;x86_64` instalada e licença do SDK aceita pelo proprietário do servidor.
+
+Confirme o host:
+
+```bash
+bash ./scripts/check-host.sh
+```
+
+Instale a imagem após aceitar os termos do Android SDK:
+
+```bash
+bash ./scripts/provision-image.sh
+```
+
+## Desenvolvimento seguro
+
+```bash
+cp .env.example .env
+export WORKER_API_TOKEN="$(openssl rand -hex 32)"
+export WORKER_ENCRYPTION_KEY="$(openssl rand -hex 32)"
+export WORKER_DATA_DIR="$(mktemp -d)"
+export ANDROID_DRY_RUN=true
+npm install
+npm test
+npm run dev
+```
+
+`ANDROID_DRY_RUN=true` valida a API e a persistência sem iniciar um emulador.
+
+## API inicial
+
+- `GET /health` — verifica KVM e componentes do SDK.
+- `GET /v1/profiles` — lista os ambientes.
+- `POST /v1/profiles` — cria um AVD persistente.
+- `GET /v1/profiles/:id` — consulta o estado.
+- `POST /v1/profiles/:id/start` — inicia o Android.
+- `POST /v1/profiles/:id/stop` — encerra o Android com segurança.
+
+Todas as rotas `/v1` exigem `Authorization: Bearer <WORKER_API_TOKEN>`.
+
+Os arquivos de perfil, incluindo credenciais de proxy, são criptografados em repouso com AES-256-GCM. Guarde `WORKER_ENCRYPTION_KEY` fora do repositório; perdê-la torna os perfis armazenados irrecuperáveis.
+
+## Limites desta primeira versão
+
+- HTTP/HTTPS usa o proxy nativo do Android Emulator.
+- SOCKS5 está modelado, mas só será habilitado com um túnel de rede e kill switch.
+- O streaming da tela, instalação assistida de aplicativos e ligação ao painel entram na próxima fase.
+- Não há importação ou injeção de tokens de autenticação.
