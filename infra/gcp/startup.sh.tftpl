@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install -y ca-certificates curl git jq unzip qemu-kvm
+
+if ! command -v node >/dev/null 2>&1 || [ "$(node --version | cut -d. -f1 | tr -d v)" -lt 22 ]; then
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  apt-get install -y nodejs
+fi
+
+if ! id nexo >/dev/null 2>&1; then
+  useradd --system --create-home --home-dir /home/nexo --shell /bin/bash nexo
+fi
+usermod -aG kvm nexo
+
+install -d -o nexo -g nexo /opt/nexo-mobile /var/lib/nexo-mobile
+
+if [ ! -d /opt/nexo-mobile/.git ]; then
+  rm -rf /opt/nexo-mobile
+  git clone --depth 1 "${repository_url}" /opt/nexo-mobile
+fi
+
+chown -R nexo:nexo /opt/nexo-mobile /var/lib/nexo-mobile
+sudo -u nexo npm --prefix /opt/nexo-mobile/worker ci
+sudo -u nexo npm --prefix /opt/nexo-mobile/worker run build
+
+install -d -m 0750 /etc/nexo-mobile
+if [ ! -f /etc/nexo-mobile/worker.env ]; then
+  api_token="$(openssl rand -hex 32)"
+  encryption_key="$(openssl rand -hex 32)"
+  cat > /etc/nexo-mobile/worker.env <<EOF
+WORKER_API_TOKEN=$api_token
+WORKER_ENCRYPTION_KEY=$encryption_key
+WORKER_PORT=8787
+WORKER_HOST=127.0.0.1
+WORKER_DATA_DIR=/var/lib/nexo-mobile
+ANDROID_SDK_ROOT=/opt/android-sdk
+ANDROID_AVD_HOME=/var/lib/nexo-mobile/avd
+ANDROID_SYSTEM_IMAGE=system-images;android-34;google_apis_playstore;x86_64
+ANDROID_DEVICE_ID=pixel_7_pro
+ANDROID_DRY_RUN=true
+EOF
+  chmod 0600 /etc/nexo-mobile/worker.env
+
+  cat > /root/nexo-worker-credentials.txt <<EOF
+WORKER_API_TOKEN=$api_token
+WORKER_ENCRYPTION_KEY=$encryption_key
+EOF
+  chmod 0600 /root/nexo-worker-credentials.txt
+fi
+
+install -m 0644 /opt/nexo-mobile/worker/deploy/nexo-android-worker.service /etc/systemd/system/nexo-android-worker.service
+systemctl daemon-reload
+systemctl enable --now nexo-android-worker.service
+
+if [ -e /dev/kvm ]; then
+  echo "KVM is available." > /var/lib/nexo-mobile/bootstrap-status.txt
+else
+  echo "KVM is unavailable. Confirm nested virtualization on the VM." > /var/lib/nexo-mobile/bootstrap-status.txt
+fi
+
