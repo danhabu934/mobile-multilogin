@@ -1,0 +1,7 @@
+subscription_id      = "00000000-0000-0000-0000-000000000000"
+location             = "East US"
+vm_size              = "Standard_D4s_v3"
+admin_username       = "nexoadmin"
+admin_cidr           = "203.0.113.10/32"
+admin_ssh_public_key = "ssh-ed25519 AAAA..."
+
