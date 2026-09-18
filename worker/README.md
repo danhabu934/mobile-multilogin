@@ -1,8 +1,29 @@
 # Nexo Android Worker
 
-Serviço Linux responsável por criar e executar os Android Virtual Devices. O painel da Vercel não executa Android diretamente; ele envia comandos autenticados para este worker.
+Serviço Windows/Linux responsável por criar e executar os Android Virtual Devices. O painel da Vercel não executa Android diretamente; ele envia comandos autenticados para este worker.
 
-## Requisitos do host
+## Windows 10/11
+
+Requisitos recomendados para um perfil por vez:
+
+- CPU Intel/AMD com virtualização habilitada na BIOS.
+- 16 GB de RAM (feche navegadores e programas pesados antes de iniciar o emulador).
+- Node.js 22 ou superior.
+- Android Studio com Android SDK, Emulator, Platform Tools e Command-line Tools.
+- Imagem Android 14: `system-images;android-34;google_apis_playstore;x86_64`.
+- Windows Hypervisor Platform ou Android Emulator Hypervisor Driver funcionando.
+
+No Android Studio, abra **SDK Manager** e instale os componentes e a imagem Google Play acima, aceitando pessoalmente a licença do Android SDK. Depois, no PowerShell aberto dentro da pasta `worker`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\check-host-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-windows.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\start-windows.ps1
+```
+
+O setup cria `worker/.env.windows` localmente com tokens aleatórios. Esse arquivo é ignorado pelo Git e não deve ser compartilhado. No Windows o celular abre em uma janela visível; o padrão Linux continua sendo headless.
+
+## Linux: requisitos do host
 
 - Ubuntu/Debian x86_64 com virtualização aninhada habilitada.
 - `/dev/kvm` disponível para o usuário do serviço.
