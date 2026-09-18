@@ -31,6 +31,8 @@ $tokenLine.Substring('WORKER_API_TOKEN='.Length) | Set-Clipboard
 
 Cole a chave no painel e conecte. O token fica somente na sessão da aba. O worker aceita o domínio de produção e permanece vinculado ao endereço local do computador.
 
+Os commits enviados para a branch `main` publicam automaticamente a versão de produção na Vercel.
+
 As configurações de Azure e Google Cloud permanecem em `infra/` apenas como alternativas futuras.
 
 ## Segurança
