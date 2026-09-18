@@ -13,6 +13,24 @@ await manager.init()
 
 const app = express()
 app.disable('x-powered-by')
+const allowedOrigins = new Set((process.env.WORKER_ALLOWED_ORIGINS ?? [
+  'https://mobile-multilogin.vercel.app',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+].join(',')).split(',').map(origin => origin.trim()).filter(Boolean))
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  if (origin && allowedOrigins.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Private-Network', 'true')
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
 app.use(express.json({ limit: '64kb' }))
 
 function authenticate(req: Request, res: Response, next: NextFunction) {
