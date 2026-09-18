@@ -1,0 +1,6 @@
+project_id    = "seu-project-id"
+region        = "us-central1"
+zone          = "us-central1-a"
+machine_type  = "n2-standard-4"
+disk_size_gb  = 80
+
