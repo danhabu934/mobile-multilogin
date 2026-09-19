@@ -1,12 +1,15 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { spawn, spawnSync } from 'node:child_process'
+import os from 'node:os'
+import { promisify } from 'node:util'
+import { execFile, spawn, spawnSync } from 'node:child_process'
 import type { WorkerConfig } from './config.js'
 import { ProfileStore } from './store.js'
 import type { AndroidProfile, CommandResult, ProxyConfig } from './types.js'
 
 const now = () => new Date().toISOString()
+const execFileAsync = promisify(execFile)
 
 function safeAvdName(id: string) {
   return `nexo_${id}`
@@ -19,6 +22,7 @@ function allocatePort(id: string) {
 }
 
 export class AndroidManager {
+  private readonly pendingStarts = new Set<string>()
   constructor(private readonly config: WorkerConfig, private readonly store: ProfileStore) {}
 
   async init() {
@@ -36,9 +40,14 @@ export class AndroidManager {
     let accelerationDetails = kvm ? '/dev/kvm' : 'unavailable'
 
     if (this.config.platform === 'win32' && emulator) {
-      const result = spawnSync(this.config.emulatorPath, ['-accel-check'], { timeout: 15_000, encoding: 'utf8' })
-      acceleration = result.status === 0
-      accelerationDetails = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim() || `exit ${result.status}`
+      try {
+        const result = await execFileAsync(this.config.emulatorPath, ['-accel-check'], { timeout: 15_000, encoding: 'utf8' })
+        acceleration = true
+        accelerationDetails = `${result.stdout}\n${result.stderr}`.trim() || 'available'
+      } catch (error) {
+        const result = error as Error & { stdout?: string; stderr?: string }
+        accelerationDetails = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim() || result.message
+      }
     }
 
     return {
@@ -86,57 +95,92 @@ export class AndroidManager {
   }
 
   async start(id: string) {
-    const profile = await this.require(id)
-    if ((await this.refresh(profile)).status === 'running') return this.sanitize(profile)
+    if (this.pendingStarts.has(id)) throw new Error('Este Android já está iniciando')
+    this.pendingStarts.add(id)
+    try {
+      const profile = await this.require(id)
+      const current = await this.refresh(profile)
+      if (current.status === 'running' || (current.status === 'starting' && profile.pid)) return current
 
-    const capabilities = await this.capabilities()
-    if (!capabilities.ready) throw new Error('Worker is missing hardware acceleration or Android SDK components')
-    if (profile.proxy.type === 'socks5') throw new Error('SOCKS5 requires the network tunnel module and is not enabled in this worker version')
+      const profiles = await this.store.list()
+      const active = profiles.filter(item => item.id !== id && (
+        this.pendingStarts.has(item.id) ||
+        (this.config.dryRun ? item.status === 'running' || item.status === 'starting' : !!item.pid && this.processAlive(item.pid))
+      ))
+      if (active.length >= this.config.maxActiveEmulators) {
+        throw new Error(`Feche outro Android antes de iniciar este (limite de ${this.config.maxActiveEmulators} em execução)`)
+      }
+      if (!this.config.dryRun && this.config.platform === 'win32') {
+        const availableMb = Math.floor(os.freemem() / 1024 / 1024)
+        const minimumMb = this.config.emulatorMemoryMb + 2048
+        if (availableMb < minimumMb) {
+          throw new Error(`Memória livre insuficiente: ${availableMb} MB disponíveis. Libere ${minimumMb} MB antes de iniciar o Android`)
+        }
+      }
 
-    profile.status = 'starting'
-    profile.updatedAt = now()
-    profile.lastError = undefined
-    await this.store.save(profile)
+      const capabilities = await this.capabilities()
+      if (!capabilities.ready) throw new Error('Worker is missing hardware acceleration or Android SDK components')
+      if (profile.proxy.type === 'socks5') throw new Error('SOCKS5 requires the network tunnel module and is not enabled in this worker version')
 
-    await this.tuneAvd(profile)
-
-    const args = [
-      '-avd', profile.avdName,
-      '-port', String(profile.emulatorPort),
-      '-no-boot-anim',
-      '-gpu', this.config.emulatorGpu,
-      '-accel', 'on',
-      '-memory', String(this.config.emulatorMemoryMb),
-      '-cores', String(this.config.emulatorCores),
-      '-netdelay', 'none',
-      '-netspeed', 'full',
-    ]
-    if (this.config.headless) args.push('-no-window', '-no-audio')
-    const proxy = this.proxyArgument(profile.proxy)
-    if (proxy) args.push('-http-proxy', proxy)
-
-    if (this.config.dryRun) {
-      profile.status = 'running'
-      profile.pid = 99999
+      profile.status = 'starting'
       profile.updatedAt = now()
+      profile.lastError = undefined
       await this.store.save(profile)
-      return this.sanitize(profile)
-    }
 
-    const logPath = path.join(this.config.logDir, `${profile.id}.log`)
-    const logFd = fs.openSync(logPath, 'a', 0o600)
-    const child = spawn(this.config.emulatorPath, args, {
-      detached: true,
-      windowsHide: this.config.platform === 'win32',
-      stdio: ['ignore', logFd, logFd],
-      env: { ...process.env, ANDROID_AVD_HOME: this.config.avdHome, ANDROID_SDK_ROOT: this.config.sdkRoot },
-    })
-    child.unref()
-    fs.closeSync(logFd)
-    profile.pid = child.pid
-    profile.updatedAt = now()
-    await this.store.save(profile)
-    return this.sanitize(profile)
+      try {
+        await this.tuneAvd(profile)
+
+        const args = [
+          '-avd', profile.avdName,
+          '-port', String(profile.emulatorPort),
+          '-no-boot-anim',
+          '-gpu', this.config.emulatorGpu,
+          '-accel', 'on',
+          '-memory', String(this.config.emulatorMemoryMb),
+          '-cores', String(this.config.emulatorCores),
+          '-netdelay', 'none',
+          '-netspeed', 'full',
+        ]
+        if (this.config.headless) args.push('-no-window', '-no-audio')
+        const proxy = this.proxyArgument(profile.proxy)
+        if (proxy) args.push('-http-proxy', proxy)
+
+        if (this.config.dryRun) {
+          profile.status = 'running'
+          profile.pid = 99999
+        } else {
+          const logPath = path.join(this.config.logDir, `${profile.id}.log`)
+          const logFd = fs.openSync(logPath, 'a', 0o600)
+          try {
+            const child = spawn(this.config.emulatorPath, args, {
+              detached: true,
+              windowsHide: this.config.platform === 'win32',
+              stdio: ['ignore', logFd, logFd],
+              env: { ...process.env, ANDROID_AVD_HOME: this.config.avdHome, ANDROID_SDK_ROOT: this.config.sdkRoot },
+            })
+            await new Promise<void>((resolve, reject) => {
+              child.once('spawn', resolve)
+              child.once('error', reject)
+            })
+            child.unref()
+            profile.pid = child.pid
+          } finally {
+            fs.closeSync(logFd)
+          }
+        }
+        profile.updatedAt = now()
+        await this.store.save(profile)
+        return this.sanitize(profile)
+      } catch (error) {
+        profile.status = 'error'
+        profile.lastError = error instanceof Error ? error.message : 'Android start failed'
+        profile.updatedAt = now()
+        await this.store.save(profile)
+        throw error
+      }
+    } finally {
+      this.pendingStarts.delete(id)
+    }
   }
 
   async stop(id: string) {
@@ -192,7 +236,8 @@ export class AndroidManager {
       'hw.keyboard': 'yes',
     }
 
-    const lines = (await fsp.readFile(configPath, 'utf8')).split(/\r?\n/)
+    const original = await fsp.readFile(configPath, 'utf8')
+    const lines = original.split(/\r?\n/)
     const updated = new Set<string>()
     const tuned = lines.map(line => {
       const separator = line.indexOf('=')
@@ -205,7 +250,8 @@ export class AndroidManager {
     for (const [key, value] of Object.entries(values)) {
       if (!updated.has(key)) tuned.push(`${key}=${value}`)
     }
-    await fsp.writeFile(configPath, `${tuned.filter((line, index, all) => line || index < all.length - 1).join('\n')}\n`, 'utf8')
+    const content = `${tuned.filter((line, index, all) => line || index < all.length - 1).join('\n')}\n`
+    if (content !== original) await fsp.writeFile(configPath, content, 'utf8')
   }
 
   private proxyArgument(proxy: ProxyConfig) {
@@ -216,16 +262,23 @@ export class AndroidManager {
 
   private async refresh(profile: AndroidProfile) {
     if (this.config.dryRun) return this.sanitize(profile)
+    const previous = profile.status
     if (profile.pid && this.processAlive(profile.pid)) {
       const serial = `emulator-${profile.emulatorPort}`
-      const result = spawnSync(this.config.adbPath, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], { timeout: 4_000, encoding: 'utf8' })
-      profile.status = result.stdout.trim() === '1' ? 'running' : 'starting'
+      try {
+        const result = await execFileAsync(this.config.adbPath, ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], { timeout: 4_000, encoding: 'utf8' })
+        profile.status = result.stdout.trim() === '1' ? 'running' : 'starting'
+      } catch {
+        profile.status = 'starting'
+      }
     } else if (profile.status === 'running' || profile.status === 'starting') {
       profile.status = 'stopped'
       profile.pid = undefined
     }
-    profile.updatedAt = now()
-    await this.store.save(profile)
+    if (profile.status !== previous) {
+      profile.updatedAt = now()
+      await this.store.save(profile)
+    }
     return this.sanitize(profile)
   }
 
