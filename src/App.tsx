@@ -305,6 +305,10 @@ function App() {
       notify('Conecte o worker para controlar o celular real')
       return
     }
+    if (status === 'running' && ids.length > 1) {
+      notify('Para manter o desempenho, inicie apenas um Android por vez.')
+      return
+    }
     setBusyIds(list => [...new Set([...list, ...ids])])
     try {
       await Promise.all(ids.map(id => workerRequest(`/v1/profiles/${id}/${status === 'running' ? 'start' : 'stop'}`, { method: 'POST' })))
@@ -312,6 +316,7 @@ function App() {
       notify(status === 'running' ? 'Celular Android iniciado' : 'Celular Android desligado')
     } catch (error) {
       notify(error instanceof Error ? error.message : 'Falha ao controlar o celular')
+      await refreshProfiles().catch(() => undefined)
     } finally {
       setBusyIds(list => list.filter(id => !ids.includes(id)))
     }
