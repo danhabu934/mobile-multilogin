@@ -99,12 +99,13 @@ function workerToProfile(profile: WorkerProfile): Profile {
   const status: Status = profile.status === 'running' || profile.status === 'starting'
     ? 'running'
     : profile.status === 'created' ? 'ready' : 'offline'
+  const androidApi = profile.systemImage.match(/android-(\d+)/)?.[1]
   return {
     id: profile.id,
     name: profile.displayName,
     group: 'Android local',
     device: profile.deviceId.replaceAll('_', ' '),
-    android: 'Android 14',
+    android: androidApi ? `Android ${androidApi}` : 'Android',
     status,
     proxyType: profile.proxy.type === 'none' ? 'SEM PROXY' : profile.proxy.type.toUpperCase(),
     proxyHost: profile.proxy.host ?? '—',
@@ -471,7 +472,7 @@ function NewProfile({ onClose, onSave }: { onClose: () => void, onSave: (p: Prof
   const [checked, setChecked] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
-  const [form, setForm] = useState({ name: '', group: 'TikTok', device: 'Pixel 8', android: 'Android 14', proxyType: 'none', proxyHost: '', proxyPort: '', proxyUser: '', proxyPassword: '' })
+  const [form, setForm] = useState({ name: '', group: 'TikTok', device: 'Pixel 8', android: 'Android 15', proxyType: 'none', proxyHost: '', proxyPort: '', proxyUser: '', proxyPassword: '' })
   const change = (key: string, value: string) => setForm(f => ({ ...f, [key]: value }))
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -626,7 +627,7 @@ function ImportMetric({label, value, tone}: {label: string, value: number, tone:
 function Detail({ profile, lastImport, onClose, onStart, onImport, notify }: { profile: Profile, lastImport?: ImportRecord, onClose: () => void, onStart: () => void, onImport: () => void, notify: (s: string) => void }) {
   return <div className="drawer-layer"><button className="scrim" onClick={onClose}/><section className="drawer">
     <div className="drawer-head"><div className="phone-avatar large"><Smartphone size={24}/></div><div><h2>{profile.name}</h2><span>{profile.id} · {profile.group}</span></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
-    <div className="device-stage"><div className="mock-phone"><div className="notch"/><div className="android-screen"><span>14</span><small>{profile.status === 'running' ? 'Conectando ao stream…' : 'Dispositivo desligado'}</small></div></div></div>
+    <div className="device-stage"><div className="mock-phone"><div className="notch"/><div className="android-screen"><span>{profile.android.replace('Android ', '')}</span><small>{profile.status === 'running' ? 'Conectando ao stream…' : 'Dispositivo desligado'}</small></div></div></div>
     <div className="quick-actions"><button className="primary" onClick={onStart}><Play size={17}/>Iniciar celular</button><button className="secondary" onClick={() => notify('Snapshot solicitado')}><Copy size={17}/>Snapshot</button></div>
     <div className="detail-section"><h3>Dispositivo</h3><div className="detail-grid"><span>Modelo<strong>{profile.device}</strong></span><span>Sistema<strong>{profile.android}</strong></span><span>Aplicativos<strong>{profile.apps} instalados</strong></span><span>Armazenamento<strong>6,1 GB</strong></span></div></div>
     <div className="detail-section"><h3>Rede e segurança</h3><div className="network-card"><ShieldCheck size={22}/><div><strong>{profile.proxyType} · {profile.proxyHost}</strong><small>{profile.ip} · Kill switch preparado</small></div><button onClick={() => notify('Teste de proxy enviado')}><Wifi size={17}/></button></div></div>
