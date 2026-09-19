@@ -104,6 +104,10 @@ export class AndroidManager {
       '-no-boot-anim',
       '-gpu', this.config.emulatorGpu,
       '-accel', 'on',
+      '-memory', String(this.config.emulatorMemoryMb),
+      '-cores', String(this.config.emulatorCores),
+      '-netdelay', 'none',
+      '-netspeed', 'full',
     ]
     if (this.config.headless) args.push('-no-window', '-no-audio')
     const proxy = this.proxyArgument(profile.proxy)
@@ -121,6 +125,7 @@ export class AndroidManager {
     const logFd = fs.openSync(logPath, 'a', 0o600)
     const child = spawn(this.config.emulatorPath, args, {
       detached: true,
+      windowsHide: this.config.platform === 'win32',
       stdio: ['ignore', logFd, logFd],
       env: { ...process.env, ANDROID_AVD_HOME: this.config.avdHome, ANDROID_SDK_ROOT: this.config.sdkRoot },
     })
