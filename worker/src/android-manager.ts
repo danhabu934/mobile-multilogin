@@ -98,6 +98,8 @@ export class AndroidManager {
     profile.lastError = undefined
     await this.store.save(profile)
 
+    await this.tuneAvd(profile)
+
     const args = [
       '-avd', profile.avdName,
       '-port', String(profile.emulatorPort),
@@ -166,7 +168,44 @@ export class AndroidManager {
       env: { ...process.env, ANDROID_AVD_HOME: this.config.avdHome, ANDROID_SDK_ROOT: this.config.sdkRoot },
     })
     if (result.status !== 0) throw new Error(`AVD creation failed: ${result.stderr || result.stdout}`)
+    await this.tuneAvd(profile)
     return { command: this.config.avdManagerPath, args, code: result.status ?? 0, stdout: result.stdout, stderr: result.stderr }
+  }
+
+  private async tuneAvd(profile: AndroidProfile) {
+    if (this.config.dryRun) return
+    const configPath = path.join(this.config.avdHome, `${profile.avdName}.avd`, 'config.ini')
+    if (!fs.existsSync(configPath)) return
+
+    const [width, height] = this.config.emulatorResolution.split('x').map(Number)
+    if (!Number.isFinite(width) || !Number.isFinite(height)) throw new Error('ANDROID_EMULATOR_RESOLUTION must use WIDTHxHEIGHT')
+
+    const values: Record<string, string> = {
+      'hw.cpu.ncore': String(this.config.emulatorCores),
+      'hw.ramSize': String(this.config.emulatorMemoryMb),
+      'vm.heapSize': String(this.config.emulatorHeapMb),
+      'hw.gpu.enabled': 'yes',
+      'hw.gpu.mode': this.config.emulatorGpu,
+      'hw.lcd.width': String(width),
+      'hw.lcd.height': String(height),
+      'hw.lcd.density': String(this.config.emulatorDensity),
+      'hw.keyboard': 'yes',
+    }
+
+    const lines = (await fsp.readFile(configPath, 'utf8')).split(/\r?\n/)
+    const updated = new Set<string>()
+    const tuned = lines.map(line => {
+      const separator = line.indexOf('=')
+      if (separator < 0) return line
+      const key = line.slice(0, separator).trim()
+      if (!(key in values)) return line
+      updated.add(key)
+      return `${key}=${values[key]}`
+    })
+    for (const [key, value] of Object.entries(values)) {
+      if (!updated.has(key)) tuned.push(`${key}=${value}`)
+    }
+    await fsp.writeFile(configPath, `${tuned.filter((line, index, all) => line || index < all.length - 1).join('\n')}\n`, 'utf8')
   }
 
   private proxyArgument(proxy: ProxyConfig) {
