@@ -17,7 +17,8 @@ test('creates, starts and stops an isolated profile in dry-run mode', async () =
     avdManagerPath: '/opt/android-sdk/cmdline-tools/latest/bin/avdmanager',
     systemImage: 'system-images;android-35;google_apis_playstore;x86_64', deviceId: 'pixel_7_pro',
     platform: 'linux', headless: true, emulatorGpu: 'swiftshader_indirect', emulatorMemoryMb: 4096,
-    emulatorCores: 4, emulatorHeapMb: 512, emulatorResolution: '720x1280', emulatorDensity: 320, dryRun: true,
+    emulatorCores: 4, emulatorHeapMb: 512, emulatorResolution: '720x1280', emulatorDensity: 320,
+    maxActiveEmulators: 1, dryRun: true,
   }
   const store = new ProfileStore(config.profileDir, config.encryptionKey)
   const manager = new AndroidManager(config, store)
@@ -30,9 +31,13 @@ test('creates, starts and stops an isolated profile in dry-run mode', async () =
   const started = await manager.start('perfil-001')
   assert.equal(started.status, 'running')
 
+  await manager.create({ id: 'perfil-002', displayName: 'Perfil secundário', proxy: { type: 'none' } })
+  await assert.rejects(manager.start('perfil-002'), /Feche outro Android/)
+
   const stopped = await manager.stop('perfil-001')
   assert.equal(stopped.status, 'stopped')
-  assert.equal((await manager.list()).length, 1)
+  assert.equal((await manager.start('perfil-002')).status, 'running')
+  assert.equal((await manager.list()).length, 2)
 
   const stored = await fs.readFile(path.join(config.profileDir, 'perfil-001.json'), 'utf8')
   assert.equal(stored.includes('secret'), false)
