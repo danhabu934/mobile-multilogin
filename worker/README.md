@@ -27,8 +27,8 @@ O setup cria `worker/.env.windows` localmente com tokens aleatórios. Esse arqui
 
 - Execute um Android de cada vez. O worker usa `ANDROID_MAX_ACTIVE_EMULATORS=1` por padrão e verifica se há pelo menos 6 GB de RAM disponíveis antes de iniciar um perfil de 4 GB no Windows. Perfis parados continuam salvos com seus aplicativos e dados.
 - Feche Android Studio, VMware e outros emuladores durante o uso. Mantenha o worker e o navegador abertos.
-- Os ajustes já aplicados são GPU do computador (`ANDROID_EMULATOR_GPU=host`), 4 núcleos, 4 GB de RAM e tela de 720 × 1280. A configuração do AVD só é regravada quando algum valor muda, preservando inicializações rápidas quando possível.
-- Em instalações já existentes, atualize o código e execute `npm run build` na pasta `worker`; não precisa rodar o setup nem apagar os perfis. Reinicie o worker após a compilação.
+- Os ajustes padrão no Windows são GPU do computador (`ANDROID_EMULATOR_GPU=host`), 4 núcleos, 4 GB de RAM e tela de 540 × 960 com densidade 240. Isso mantém os elementos do mesmo tamanho lógico e reduz o trabalho gráfico; a imagem fica menos nítida. A configuração do AVD só é regravada quando algum valor muda, preservando inicializações rápidas quando possível.
+- Em instalações já existentes, desligue o Android, atualize o código, execute `npm run build` na pasta `worker` e rode `powershell -ExecutionPolicy Bypass -File .\scripts\optimize-windows.ps1` uma vez. O script altera apenas as opções de desempenho em `.env.windows`. Depois, reinicie o worker. Não rode novamente o setup nem apague os perfis.
 - O desempenho do vídeo também depende da conexão, do aplicativo e do suporte do emulador. As verificações regionais e de login dos aplicativos são independentes da RAM.
 
 ## Linux: requisitos do host
