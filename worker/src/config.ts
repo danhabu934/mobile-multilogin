@@ -44,9 +44,12 @@ export function getConfig() {
     deviceId: process.env.ANDROID_DEVICE_ID ?? 'pixel_7_pro',
     platform: process.platform,
     headless: process.env.ANDROID_HEADLESS ? process.env.ANDROID_HEADLESS === 'true' : !isWindows,
-    emulatorGpu: process.env.ANDROID_EMULATOR_GPU ?? (isWindows ? 'auto' : 'swiftshader_indirect'),
-    emulatorMemoryMb: Number(process.env.ANDROID_EMULATOR_MEMORY_MB ?? 3072),
+    emulatorGpu: process.env.ANDROID_EMULATOR_GPU ?? (isWindows ? 'host' : 'swiftshader_indirect'),
+    emulatorMemoryMb: Number(process.env.ANDROID_EMULATOR_MEMORY_MB ?? 4096),
     emulatorCores: Number(process.env.ANDROID_EMULATOR_CORES ?? 4),
+    emulatorHeapMb: Number(process.env.ANDROID_EMULATOR_HEAP_MB ?? 512),
+    emulatorResolution: process.env.ANDROID_EMULATOR_RESOLUTION ?? '720x1280',
+    emulatorDensity: Number(process.env.ANDROID_EMULATOR_DENSITY ?? 320),
     dryRun: process.env.ANDROID_DRY_RUN === 'true',
   }
 }
