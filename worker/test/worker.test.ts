@@ -16,8 +16,8 @@ test('creates, starts and stops an isolated profile in dry-run mode', async () =
     adbPath: '/opt/android-sdk/platform-tools/adb', emulatorPath: '/opt/android-sdk/emulator/emulator',
     avdManagerPath: '/opt/android-sdk/cmdline-tools/latest/bin/avdmanager',
     systemImage: 'system-images;android-35;google_apis_playstore;x86_64', deviceId: 'pixel_7_pro',
-    platform: 'linux', headless: true, emulatorGpu: 'swiftshader_indirect', emulatorMemoryMb: 3072,
-    emulatorCores: 4, dryRun: true,
+    platform: 'linux', headless: true, emulatorGpu: 'swiftshader_indirect', emulatorMemoryMb: 4096,
+    emulatorCores: 4, emulatorHeapMb: 512, emulatorResolution: '720x1280', emulatorDensity: 320, dryRun: true,
   }
   const store = new ProfileStore(config.profileDir, config.encryptionKey)
   const manager = new AndroidManager(config, store)
