@@ -9,6 +9,19 @@ $required = @(
 
 $failures = 0
 
+$bundledJava = Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'
+if (-not $env:JAVA_HOME -and (Test-Path (Join-Path $bundledJava 'bin\java.exe'))) {
+  $env:JAVA_HOME = $bundledJava
+}
+
+if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
+  $env:Path = "$(Join-Path $env:JAVA_HOME 'bin');$env:Path"
+  Write-Host "[ok] Java $env:JAVA_HOME" -ForegroundColor Green
+} else {
+  Write-Host '[missing] Java runtime (JAVA_HOME)' -ForegroundColor Red
+  $failures++
+}
+
 foreach ($item in $required) {
   if (Test-Path $item) {
     Write-Host "[ok] $item" -ForegroundColor Green
@@ -49,4 +62,3 @@ if ($failures -gt 0) {
 }
 
 Write-Host 'Windows host is ready for the Android worker.' -ForegroundColor Green
-
