@@ -50,6 +50,7 @@ export function getConfig() {
     emulatorHeapMb: Number(process.env.ANDROID_EMULATOR_HEAP_MB ?? 512),
     emulatorResolution: process.env.ANDROID_EMULATOR_RESOLUTION ?? '720x1280',
     emulatorDensity: Number(process.env.ANDROID_EMULATOR_DENSITY ?? 320),
+    maxActiveEmulators: Number(process.env.ANDROID_MAX_ACTIVE_EMULATORS ?? 1),
     dryRun: process.env.ANDROID_DRY_RUN === 'true',
   }
 }
