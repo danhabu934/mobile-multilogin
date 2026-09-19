@@ -32,6 +32,7 @@ if (-not (Test-Path $envFile)) {
     'ANDROID_EMULATOR_HEAP_MB=512',
     'ANDROID_EMULATOR_RESOLUTION=720x1280',
     'ANDROID_EMULATOR_DENSITY=320',
+    'ANDROID_MAX_ACTIVE_EMULATORS=1',
     'ANDROID_DRY_RUN=false'
   )
   [IO.File]::WriteAllLines($envFile, $lines, (New-Object Text.UTF8Encoding($false)))
