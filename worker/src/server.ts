@@ -75,7 +75,8 @@ app.post('/v1/profiles/:id/stop', async (req, res) => {
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof ZodError) return res.status(400).json({ error: 'Invalid request', details: error.issues })
   const message = error instanceof Error ? error.message : 'Internal worker error'
-  const status = message === 'Profile not found' ? 404 : message === 'Profile already exists' ? 409 : 500
+  const status = message === 'Profile not found' ? 404
+    : message === 'Profile already exists' || message.startsWith('Feche outro Android') || message.startsWith('Este Android já') || message.startsWith('Memória livre insuficiente') ? 409 : 500
   res.status(status).json({ error: message })
 })
 
