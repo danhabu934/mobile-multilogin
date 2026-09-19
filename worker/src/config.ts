@@ -40,11 +40,13 @@ export function getConfig() {
     adbPath: path.join(sdkRoot, 'platform-tools', executable('adb', '.exe')),
     emulatorPath: path.join(sdkRoot, 'emulator', executable('emulator', '.exe')),
     avdManagerPath: path.join(sdkRoot, 'cmdline-tools', 'latest', 'bin', executable('avdmanager', '.bat')),
-    systemImage: process.env.ANDROID_SYSTEM_IMAGE ?? 'system-images;android-34;google_apis_playstore;x86_64',
+    systemImage: process.env.ANDROID_SYSTEM_IMAGE ?? 'system-images;android-35;google_apis_playstore;x86_64',
     deviceId: process.env.ANDROID_DEVICE_ID ?? 'pixel_7_pro',
     platform: process.platform,
     headless: process.env.ANDROID_HEADLESS ? process.env.ANDROID_HEADLESS === 'true' : !isWindows,
     emulatorGpu: process.env.ANDROID_EMULATOR_GPU ?? (isWindows ? 'auto' : 'swiftshader_indirect'),
+    emulatorMemoryMb: Number(process.env.ANDROID_EMULATOR_MEMORY_MB ?? 3072),
+    emulatorCores: Number(process.env.ANDROID_EMULATOR_CORES ?? 4),
     dryRun: process.env.ANDROID_DRY_RUN === 'true',
   }
 }
