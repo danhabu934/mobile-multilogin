@@ -23,10 +23,12 @@ if (-not (Test-Path $envFile)) {
     "WORKER_DATA_DIR=$dataDir",
     "ANDROID_SDK_ROOT=$sdkRoot",
     "ANDROID_AVD_HOME=$(Join-Path $dataDir 'avd')",
-    'ANDROID_SYSTEM_IMAGE=system-images;android-34;google_apis_playstore;x86_64',
+    'ANDROID_SYSTEM_IMAGE=system-images;android-35;google_apis_playstore;x86_64',
     'ANDROID_DEVICE_ID=pixel_7_pro',
     'ANDROID_HEADLESS=false',
     'ANDROID_EMULATOR_GPU=auto',
+    'ANDROID_EMULATOR_MEMORY_MB=3072',
+    'ANDROID_EMULATOR_CORES=4',
     'ANDROID_DRY_RUN=false'
   )
   [IO.File]::WriteAllLines($envFile, $lines, (New-Object Text.UTF8Encoding($false)))
@@ -42,4 +44,3 @@ try {
 }
 
 Write-Host 'Setup complete. Start with: powershell -ExecutionPolicy Bypass -File .\scripts\start-windows.ps1' -ForegroundColor Green
-
