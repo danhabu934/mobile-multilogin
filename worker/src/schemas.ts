@@ -19,3 +19,21 @@ export const createProfileSchema = z.object({
   displayName: z.string().min(2).max(80),
   proxy: proxySchema.default({ type: 'none' }),
 })
+
+const androidSettingsSchema = z.object({
+  locale: z.string().regex(/^[a-z]{2,3}(?:-[A-Z]{2})?$/).optional(),
+  timezone: z.string().min(1).max(64).optional(),
+  timeFormat: z.enum(['12', '24']).optional(),
+  animationScale: z.number().min(0).max(10).optional(),
+})
+
+const appLaunchSchema = z.object({
+  packageName: z.string().regex(/^[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+$/),
+  activity: z.string().min(1).max(256).optional(),
+})
+
+export const provisionProfileSchema = z.object({
+  android: androidSettingsSchema.default({}),
+  launch: appLaunchSchema.optional(),
+  state: z.record(z.string(), z.unknown()).default({}),
+})
