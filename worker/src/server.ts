@@ -5,6 +5,7 @@ import { AndroidManager } from './android-manager.js'
 import { getConfig } from './config.js'
 import { createProfileSchema, profileIdSchema } from './schemas.js'
 import { ProfileStore } from './store.js'
+import { hydrateSerialGuarded } from './cookie-hydrator.js'
 
 const config = getConfig()
 const store = new ProfileStore(config.profileDir, config.encryptionKey)
@@ -70,6 +71,16 @@ app.post('/v1/profiles/:id/start', async (req, res) => {
 app.post('/v1/profiles/:id/stop', async (req, res) => {
   const id = profileIdSchema.parse(req.params.id)
   res.json({ profile: await manager.stop(id) })
+})
+
+app.post('/v1/hydrate', async (req, res) => {
+  const { cookies, serial } = req.body
+  try {
+    const result = await hydrateSerialGuarded(cookies, { serial })
+    res.json(result)
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
 })
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {

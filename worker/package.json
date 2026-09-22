@@ -10,6 +10,7 @@
     "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "express": "^5.1.0",
     "zod": "^4.1.5"
   },
