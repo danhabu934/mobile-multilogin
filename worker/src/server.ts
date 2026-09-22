@@ -3,12 +3,14 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import { ZodError } from 'zod'
 import { AndroidManager } from './android-manager.js'
 import { getConfig } from './config.js'
-import { createProfileSchema, profileIdSchema } from './schemas.js'
+import { createProfileSchema, profileIdSchema, provisionProfileSchema } from './schemas.js'
+import { ProfileProvisioner } from './profile-provisioner.js'
 import { ProfileStore } from './store.js'
 
 const config = getConfig()
 const store = new ProfileStore(config.profileDir, config.encryptionKey)
 const manager = new AndroidManager(config, store)
+const provisioner = new ProfileProvisioner(config)
 await manager.init()
 
 const app = express()
@@ -43,7 +45,7 @@ function authenticate(req: Request, res: Response, next: NextFunction) {
 
 app.get('/health', async (_req, res) => {
   const capabilities = await manager.capabilities()
-  res.status(capabilities.ready ? 200 : 503).json({ service: 'nexo-android-worker', version: '0.1.0', capabilities })
+  res.status(capabilities.ready ? 200 : 503).json({ service: 'nexo-android-worker', version: '0.2.0', capabilities })
 })
 
 app.use('/v1', authenticate)
@@ -72,11 +74,30 @@ app.post('/v1/profiles/:id/stop', async (req, res) => {
   res.json({ profile: await manager.stop(id) })
 })
 
+app.post('/v1/profiles/:id/provision', async (req, res) => {
+  const id = profileIdSchema.parse(req.params.id)
+  const input = provisionProfileSchema.parse(req.body)
+  const profile = await manager.get(id)
+  if (!profile) return res.status(404).json({ error: 'Profile not found' })
+  res.json({ provisioning: await provisioner.provision(profile, input) })
+})
+
+app.post('/v1/profiles/:id/start-and-provision', async (req, res) => {
+  const id = profileIdSchema.parse(req.params.id)
+  const input = provisionProfileSchema.parse(req.body)
+  await manager.start(id)
+  const profile = await manager.get(id)
+  if (!profile) return res.status(404).json({ error: 'Profile not found' })
+  res.status(202).json({ profile, provisioning: await provisioner.provision(profile, input) })
+})
+
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   if (error instanceof ZodError) return res.status(400).json({ error: 'Invalid request', details: error.issues })
   const message = error instanceof Error ? error.message : 'Internal worker error'
   const status = message === 'Profile not found' ? 404
-    : message === 'Profile already exists' || message.startsWith('Feche outro Android') || message.startsWith('Este Android já') || message.startsWith('Memória livre insuficiente') ? 409 : 500
+    : message === 'Profile already exists' || message.startsWith('Feche outro Android') || message.startsWith('Este Android já') || message.startsWith('Memória livre insuficiente') || message.startsWith('Profile must be running') ? 409
+    : message.startsWith('Authentication/session material') ? 400
+    : 500
   res.status(status).json({ error: message })
 })
 
