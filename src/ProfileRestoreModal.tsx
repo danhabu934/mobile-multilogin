@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, useMemo, useState } from 'react'
-import { AlertTriangle, CheckCircle2, Download, FileKey2, LogIn, ShieldCheck, Upload, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ClipboardPaste, Download, FileKey2, LogIn, ShieldCheck, Upload, X } from 'lucide-react'
 import {
   decryptSnapshot,
   downloadSnapshot,
@@ -7,6 +7,7 @@ import {
   ensurePersistentBrowser,
   queueLoginAssist,
   queuePortableState,
+  sanitizePortableState,
   type PortableBrowserState,
   type ProfileSnapshot,
 } from './profileRestore'
@@ -48,12 +49,13 @@ type Props = {
 }
 
 export default function ProfileRestoreModal({ profiles, imports, initialProfileId, onClose, onRestored }: Props) {
-  const [mode, setMode] = useState<'login' | 'export' | 'restore'>('login')
+  const [mode, setMode] = useState<'login' | 'export' | 'restore' | 'paste'>('login')
   const [profileId, setProfileId] = useState(initialProfileId || profiles[0]?.id || '')
   const [startUrl, setStartUrl] = useState('https://www.tiktok.com/')
   const [passphrase, setPassphrase] = useState('')
   const [fileName, setFileName] = useState('')
   const [fileContent, setFileContent] = useState('')
+  const [pastedContent, setPastedContent] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -67,6 +69,12 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     if (imported?.url) setStartUrl(imported.url)
     setMessage('')
     setError('')
+  }
+
+  const switchMode = (next: 'login' | 'export' | 'restore' | 'paste') => {
+    setMode(next)
+    setError('')
+    setMessage('')
   }
 
   const loginAssist = (event: FormEvent) => {
@@ -167,6 +175,57 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     }
   }
 
+  const parsePastedState = (raw: string): PortableBrowserState => {
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      throw new Error('JSON inválido. Cole um array de cookies ou um objeto com "cookies".')
+    }
+
+    if (Array.isArray(parsed)) {
+      return sanitizePortableState({ cookies: parsed as PortableBrowserState['cookies'], localStorage: {} })
+    }
+
+    if (parsed && typeof parsed === 'object') {
+      const source = parsed as Record<string, unknown>
+      const cookies = Array.isArray(source.cookies) ? source.cookies : []
+      const localStorage = source.localStorage && typeof source.localStorage === 'object' && !Array.isArray(source.localStorage)
+        ? source.localStorage as Record<string, string>
+        : {}
+      return sanitizePortableState({ cookies: cookies as PortableBrowserState['cookies'], localStorage })
+    }
+
+    throw new Error('Formato não reconhecido. Use um array JSON de cookies ou { "cookies": [...] }.')
+  }
+
+  const pasteCookies = (event: FormEvent) => {
+    event.preventDefault()
+    if (!profileId || !pastedContent.trim()) return
+    setError('')
+    setMessage('')
+    try {
+      const url = new URL(startUrl)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Informe uma URL http/https válida.')
+      const state = parsePastedState(pastedContent)
+      if (!state.cookies.length && !Object.keys(state.localStorage).length) {
+        throw new Error('Nenhum cookie ou preferência portátil compatível foi encontrado. Dados de autenticação sensíveis são filtrados automaticamente.')
+      }
+      queuePortableState(profileId, url.toString(), state)
+      onRestored({
+        profileId,
+        sourceProfileId: profileId,
+        fileName: 'colado-manualmente.json',
+        url: url.toString(),
+        host: url.hostname,
+        payload: state,
+      })
+      setMessage(`${state.cookies.length} cookie${state.cookies.length === 1 ? '' : 's'} e ${Object.keys(state.localStorage).length} preferência${Object.keys(state.localStorage).length === 1 ? '' : 's'} preparados somente para o perfil ${profileId}.`)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Não foi possível aplicar os dados colados.')
+    }
+  }
+
   return <div className="modal-layer"><div className="modal" style={{width:'min(760px,calc(100vw - 30px))'}}>
     <div className="modal-head">
       <div><p className="eyebrow">PROFILE RESTORE</p><h2>Sessão persistente e snapshot</h2></div>
@@ -174,9 +233,10 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     </div>
 
     <div style={{padding:'0 24px 14px', display:'flex', gap:8, flexWrap:'wrap'}}>
-      <button type="button" className={mode === 'login' ? 'primary' : 'secondary'} onClick={() => { setMode('login'); setError(''); setMessage('') }}><LogIn size={16}/> Login assistido</button>
-      <button type="button" className={mode === 'export' ? 'primary' : 'secondary'} onClick={() => { setMode('export'); setError(''); setMessage('') }}><Download size={16}/> Exportar snapshot</button>
-      <button type="button" className={mode === 'restore' ? 'primary' : 'secondary'} onClick={() => { setMode('restore'); setError(''); setMessage('') }}><Upload size={16}/> Restaurar snapshot</button>
+      <button type="button" className={mode === 'login' ? 'primary' : 'secondary'} onClick={() => switchMode('login')}><LogIn size={16}/> Login assistido</button>
+      <button type="button" className={mode === 'paste' ? 'primary' : 'secondary'} onClick={() => switchMode('paste')}><ClipboardPaste size={16}/> Colar cookies</button>
+      <button type="button" className={mode === 'export' ? 'primary' : 'secondary'} onClick={() => switchMode('export')}><Download size={16}/> Exportar snapshot</button>
+      <button type="button" className={mode === 'restore' ? 'primary' : 'secondary'} onClick={() => switchMode('restore')}><Upload size={16}/> Restaurar snapshot</button>
     </div>
 
     <div style={{padding:'0 24px 14px'}}>
@@ -192,6 +252,25 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
       </div>
       {error && <Result tone="error" text={error}/>} {message && <Result tone="success" text={message}/>} 
       <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={!profileId}><LogIn size={16}/> Preparar e abrir</button></div>
+    </form>}
+
+    {mode === 'paste' && <form onSubmit={pasteCookies}>
+      <div className="form-grid">
+        <label>Perfil de destino<select value={profileId} onChange={e => changeProfile(e.target.value)}>{profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>
+        <label>URL do site<input value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://www.tiktok.com/"/></label>
+        <label className="full">Colar cookies / JSON
+          <textarea
+            value={pastedContent}
+            onChange={e => setPastedContent(e.target.value)}
+            placeholder={'Cole aqui um array JSON de cookies, por exemplo:\n[\n  {"name":"language","value":"pt-BR","domain":".tiktok.com","path":"/"}\n]\n\nOu: {"cookies":[...],"localStorage":{...}}'}
+            style={{minHeight:180, resize:'vertical', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace'}}
+          />
+        </label>
+        <div className="review-row full"><span>Destino</span><strong>{profile ? `${profile.name} · ${profile.id}` : 'Selecione um perfil'}</strong></div>
+        <div className="warning full"><AlertTriangle size={18}/><span>Os dados colados ficam vinculados somente ao perfil escolhido. Cookies ou chaves sensíveis de autenticação são filtrados automaticamente; esta área é destinada a cookies portáveis e preferências do navegador.</span></div>
+      </div>
+      {error && <Result tone="error" text={error}/>} {message && <Result tone="success" text={message}/>} 
+      <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={!profileId || !pastedContent.trim()}><ClipboardPaste size={16}/> Aplicar ao perfil</button></div>
     </form>}
 
     {mode === 'export' && <form onSubmit={exportProfile}>
