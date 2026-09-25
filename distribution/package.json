@@ -1,0 +1,27 @@
+{
+  "name": "nexo-readiness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent Nexo hardware readiness application",
+  "main": "launcher/main.cjs",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "lint": "node scripts/check.mjs",
+    "test": "node --test test/*.test.mjs",
+    "desktop": "electron .",
+    "package:windows": "electron-builder --win nsis --x64",
+    "package:mac": "electron-builder --mac dmg --arm64 --x64"
+  },
+  "devDependencies": {"electron": "^40.0.0", "electron-builder": "^26.0.0"},
+  "build": {
+    "appId": "app.nexo.readiness",
+    "productName": "Nexo Diagnóstico",
+    "directories": {"output": "artifacts"},
+    "files": ["launcher/**", "diagnostics/**", "package.json"],
+    "asar": true,
+    "win": {"target": "nsis", "artifactName": "NexoDiagnostico-Windows.${ext}"},
+    "nsis": {"oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true, "createDesktopShortcut": true},
+    "mac": {"target": "dmg", "category": "public.app-category.utilities", "artifactName": "NexoDiagnostico-Mac-${arch}.${ext}", "hardenedRuntime": true}
+  }
+}
