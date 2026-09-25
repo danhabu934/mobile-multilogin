@@ -1,0 +1,1 @@
+const p = navigator.userAgentData?.platform || navigator.platform || ''; document.querySelector('#os').textContent = /win/i.test(p) ? 'Windows detectado. Consulte a disponibilidade abaixo.' : /mac/i.test(p) ? 'macOS detectado. Confira em Sobre Este Mac se o chip é Apple ou Intel.' : 'Escolha a plataforma. Não há pacote Linux nesta edição.';
