@@ -69,3 +69,13 @@ Os testes automatizados usam simulação ou um processo ADB de teste. Não subst
 - Worker: `npm ci --ignore-scripts`, `npm run verify:runtime`, `npm test` dentro de `worker`.
 - Interface: na raiz, `npm ci`, `npm --prefix worker ci --ignore-scripts`, `npx playwright install chromium`, `npm run test:ui`.
 - A suite de interface cria worker/dados temporários e verifica conexão, criação com RAM aplicada, edição, backups/logs e formulário de motor externo. Não usa credenciais pessoais.
+
+## Um comando sem abrir a pasta
+
+Feche a janela antiga do worker. Abra **PowerShell normal** pelo menu Iniciar e cole:
+
+```powershell
+$atualizador = Join-Path $env:TEMP 'nexo-update.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/danhabu934/mobile-multilogin/main/worker/scripts/bootstrap-update-windows.ps1' -OutFile $atualizador; powershell -NoProfile -ExecutionPolicy Bypass -File $atualizador
+```
+
+O atualizador procura um checkout único em locais comuns (pasta pessoal, Desktop, Documentos, Downloads e `C:\mobile-multilogin`), confirma o repositório/branch e recusa alterações locais. Se o checkout estiver em outro local, execute com `-RepositoryPath "CAMINHO"`. ZIP sem `.git` não é atualizado por este script. Ele não reinicializa Androids nem troca tokens.
