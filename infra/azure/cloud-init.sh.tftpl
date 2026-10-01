@@ -24,7 +24,8 @@ fi
 install -d -o nexo -g nexo /var/lib/nexo-mobile
 chown -R nexo:nexo /opt/nexo-mobile /var/lib/nexo-mobile
 
-sudo -u nexo npm --prefix /opt/nexo-mobile/worker ci
+sudo -u nexo npm --prefix /opt/nexo-mobile/worker ci --ignore-scripts
+sudo -u nexo npm --prefix /opt/nexo-mobile/worker run verify:runtime
 sudo -u nexo npm --prefix /opt/nexo-mobile/worker run build
 
 install -d -m 0750 /etc/nexo-mobile
@@ -40,9 +41,9 @@ WORKER_HOST=127.0.0.1
 WORKER_DATA_DIR=/var/lib/nexo-mobile
 ANDROID_SDK_ROOT=/opt/android-sdk
 ANDROID_AVD_HOME=/var/lib/nexo-mobile/avd
-ANDROID_SYSTEM_IMAGE=system-images;android-34;google_apis_playstore;x86_64
+ANDROID_SYSTEM_IMAGE=system-images;android-35;google_apis_playstore;x86_64
 ANDROID_DEVICE_ID=pixel_7_pro
-ANDROID_DRY_RUN=true
+ANDROID_DRY_RUN=false
 EOF
   chmod 0600 /etc/nexo-mobile/worker.env
 
@@ -62,4 +63,5 @@ if [ -e /dev/kvm ]; then
 else
   echo "KVM is unavailable. Confirm that the selected Azure size supports nested virtualization." > /var/lib/nexo-mobile/bootstrap-status.txt
 fi
+
 

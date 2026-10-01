@@ -1,13 +1,15 @@
 {
   "name": "@nexo/android-worker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-runtime.mjs",
     "start": "node dist/server.js",
-    "test": "node --import tsx --test test/*.test.ts"
+    "test": "npm run build && node --import tsx --test test/*.test.ts",
+    "predev": "node scripts/copy-runtime.mjs",
+    "verify:runtime": "node scripts/verify-runtime.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

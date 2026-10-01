@@ -10,7 +10,7 @@ Requisitos recomendados para um perfil por vez:
 - 16 GB de RAM (feche navegadores e programas pesados antes de iniciar o emulador).
 - Node.js 22 ou superior.
 - Android Studio com Android SDK, Emulator, Platform Tools e Command-line Tools.
-- Imagem Android 14: `system-images;android-34;google_apis_playstore;x86_64`.
+- Imagem Android 14: `system-images;android-35;google_apis_playstore;x86_64`.
 - Windows Hypervisor Platform ou Android Emulator Hypervisor Driver funcionando.
 
 No Android Studio, abra **SDK Manager** e instale os componentes e a imagem Google Play acima, aceitando pessoalmente a licença do Android SDK. Depois, no PowerShell aberto dentro da pasta `worker`:
@@ -37,7 +37,7 @@ O setup cria `worker/.env.windows` localmente com tokens aleatórios. Esse arqui
 - `/dev/kvm` disponível para o usuário do serviço.
 - Node.js 22 ou superior.
 - Android command-line tools, Emulator e Platform Tools em `ANDROID_SDK_ROOT`.
-- Imagem `system-images;android-34;google_apis_playstore;x86_64` instalada e licença do SDK aceita pelo proprietário do servidor.
+- Imagem `system-images;android-35;google_apis_playstore;x86_64` instalada e licença do SDK aceita pelo proprietário do servidor.
 
 Confirme o host:
 
@@ -85,3 +85,16 @@ Os arquivos de perfil, incluindo credenciais de proxy, são criptografados em re
 - SOCKS5 está modelado, mas só será habilitado com um túnel de rede e kill switch.
 - O streaming da tela, instalação assistida de aplicativos e ligação ao painel entram na próxima fase.
 - Não há importação ou injeção de tokens de autenticação.
+
+
+## Atualização 0.2: operações reais e motores externos
+
+Consulte [motores, atualização Windows e limites de compatibilidade](../docs/runtime-compatibility.md).
+
+- Configuração por perfil: imagem instalada, modelo, RAM, núcleos, resolução, GPU e câmeras.
+- CRUD autenticado, estados de boot distintos e logs; portas reservadas e operações serializadas.
+- BlueStacks/Android físico existentes via ADB: conexão local, captura, toque, instalação de APK e abertura de apps.
+- Backup local completo do AVD desligado, restauração e diagnóstico de Android/serviços/ABI.
+- Tela no painel é prévia periódica; vídeo e áudio usam janela nativa/scrcpy.
+- `npm ci --ignore-scripts`, `npm run verify:runtime`, `npm run build`, `npm test` são os comandos de validação do worker.
+- Clouds não são provisionadas com Android SDK automaticamente. A API pode responder `/health` sem aparelho; consulte `/v1/capabilities`. Instale SDK e aceleração antes de iniciar AVDs.
