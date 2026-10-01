@@ -106,7 +106,7 @@ function workerToProfile(profile: WorkerProfile): Profile {
     name: profile.displayName,
     group: profile.group || 'Android local',
     device: profile.deviceId.replaceAll('_', ' '),
-    android: profile.engine && profile.engine !== 'android-emulator' ? 'Android do dispositivo' : androidApi ? `Android ${{'33':'13','34':'14','35':'15','36':'16'}[androidApi] ?? `API ${androidApi}`}` : 'Android',
+    android: profile.engine && profile.engine !== 'android-emulator' ? 'Android do dispositivo' : androidApi ? `Android ${{'29':'10','30':'11','31':'12','32':'12L','33':'13','34':'14','35':'15','36':'16'}[androidApi] ?? `API ${androidApi}`}` : 'Android',
     status,
     proxyType: profile.proxy.type === 'none' ? 'SEM PROXY' : profile.proxy.type.toUpperCase(),
     proxyHost: profile.proxy.host ?? '—',
@@ -430,7 +430,7 @@ function App() {
 
       {showNew && <NewProfile catalogue={catalogue} api={api} onClose={() => setShowNew(false)} onSave={async profile => { await createWorkerProfile(profile); setShowNew(false); notify('Celular Android criado no worker') }}/>}
       {showImport && <SessionImporter profiles={profiles} initialProfileId={importProfileId} onClose={() => setShowImport(false)} onSave={record => { setImports(list => [record, ...list].slice(0, 50)); setShowImport(false); notify('Dados não sensíveis importados para o perfil') }}/>}
-      {detail && <Detail profile={profiles.find(p => p.id === detail.id) || detail} api={api} onRefresh={refreshProfiles} lastImport={imports.find(item => item.profileId === detail.id)} onClose={() => setDetail(null)} onStart={() => void setStatus([detail.id], 'running')} onImport={() => { openImporter(detail.id); setDetail(null) }} notify={notify}/>}
+      {detail && <Detail profile={profiles.find(p => p.id === detail.id) || detail} api={api} onRefresh={refreshProfiles} lastImport={imports.find(item => item.profileId === detail.id)} onClose={() => setDetail(null)} onStart={() => void setStatus([detail.id], 'running')} onStop={() => void setStatus([detail.id], 'offline')} onImport={() => { openImporter(detail.id); setDetail(null) }} notify={notify}/>}
       {showConnection && <ConnectionModal url={workerUrl} token={workerToken} state={connection} error={connectionError} onClose={() => setShowConnection(false)} onConnect={(url, token) => void connectWorker(url, token)}/>}
       {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
     </div>
@@ -600,10 +600,10 @@ function ImportMetric({label, value, tone}: {label: string, value: number, tone:
   return <div style={{padding:12, border:`1px solid ${safe ? '#1d5a49' : '#5b3340'}`, borderRadius:9, background:safe ? '#0d2a23' : '#24151b'}}><small style={{display:'block', color:safe ? '#69c9a5' : '#d58b9b', fontSize:9}}>{label}</small><strong style={{display:'block', marginTop:3, fontSize:18, color:safe ? '#a8efd2' : '#ffb5c2'}}>{value}</strong></div>
 }
 
-function Detail({ profile, lastImport, onClose, onStart, onImport, api, onRefresh }: { profile: Profile; lastImport?: ImportRecord; onClose: () => void; onStart: () => void; onImport: () => void; notify: (s:string)=>void; api: WorkerApi; onRefresh: () => Promise<void> }) {
+function Detail({ profile, lastImport, onClose, onStart, onStop, onImport, api, onRefresh }: { profile: Profile; lastImport?: ImportRecord; onClose: () => void; onStart: () => void; onStop: () => void; onImport: () => void; notify: (s:string)=>void; api: WorkerApi; onRefresh: () => Promise<void> }) {
   return <div className="drawer-layer"><button className="scrim" onClick={onClose}/><section className="drawer" style={{width:'min(620px,100%)'}}>
     <div className="drawer-head"><div className="phone-avatar large"><Smartphone size={24}/></div><div><h2>{profile.name}</h2><span>{profile.id} · {profile.group} · {statusLabel[profile.status]}</span></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
-    <div className="console-actions"><button className="primary" onClick={onStart}><Play size={17}/>Iniciar / conectar</button><button className="secondary" onClick={onImport}><Upload size={15}/>Dados portáveis</button></div>
+    <div className="console-actions"><button className="primary" onClick={onStart}><Play size={17}/>Iniciar / conectar</button>{profile.engine==='android-emulator'&&<button className="secondary" onClick={onStop}><Square size={16}/>Desligar</button>}<button className="secondary" onClick={onImport}><Upload size={15}/>Dados portáveis</button></div>
     {lastImport&&<p className="console-help">Pacote local: {lastImport.safeCookieCount} cookies e {lastImport.safeStorageCount} preferências · {lastImport.host}.</p>}
     <DeviceConsole profile={profile} api={api} onRefresh={onRefresh}/>
   </section></div>

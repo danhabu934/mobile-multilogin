@@ -1,7 +1,9 @@
 import path from 'node:path'
+import os from 'node:os'
 import { settingsSchema } from './schemas.js'
 
 const isWindows = process.platform === 'win32'
+const isMac = process.platform === 'darwin'
 function numberEnv(name: string, fallback: number, min: number, max: number) {
   const value = Number(process.env[name] ?? fallback)
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer between ${min} and ${max}`)
@@ -30,8 +32,8 @@ function requiredEncryptionKey(apiToken: string): string {
 
 export function getConfig() {
   const apiToken = requiredToken()
-  const sdkRoot = process.env.ANDROID_SDK_ROOT ?? (isWindows ? path.join(windowsLocalAppData(), 'Android', 'Sdk') : '/opt/android-sdk')
-  const dataDir = process.env.WORKER_DATA_DIR ?? (isWindows ? path.join(windowsLocalAppData(), 'NexoMobile') : '/var/lib/nexo-mobile')
+  const sdkRoot = process.env.ANDROID_SDK_ROOT ?? (isWindows ? path.join(windowsLocalAppData(), 'Android', 'Sdk') : isMac ? path.join(os.homedir(), 'Library', 'Android', 'sdk') : '/opt/android-sdk')
+  const dataDir = process.env.WORKER_DATA_DIR ?? (isWindows ? path.join(windowsLocalAppData(), 'NexoMobile') : isMac ? path.join(os.homedir(), 'Library', 'Application Support', 'NexoMobile') : '/var/lib/nexo-mobile')
   const executable = (name: string, windowsExtension: string) => `${name}${isWindows ? windowsExtension : ''}`
   const config = {
     apiToken,
@@ -49,7 +51,7 @@ export function getConfig() {
     systemImage: process.env.ANDROID_SYSTEM_IMAGE ?? `system-images;android-35;google_apis_playstore;${process.arch === 'arm64' ? 'arm64-v8a' : 'x86_64'}`,
     deviceId: process.env.ANDROID_DEVICE_ID ?? 'pixel_7_pro',
     platform: process.platform,
-    headless: process.env.ANDROID_HEADLESS ? process.env.ANDROID_HEADLESS === 'true' : !isWindows,
+    headless: process.env.ANDROID_HEADLESS ? process.env.ANDROID_HEADLESS === 'true' : process.platform === 'linux',
     emulatorGpu: process.env.ANDROID_EMULATOR_GPU ?? 'auto',
     emulatorMemoryMb: numberEnv('ANDROID_EMULATOR_MEMORY_MB', 4096, 1536, 16384),
     emulatorCores: numberEnv('ANDROID_EMULATOR_CORES', 4, 1, 16),

@@ -61,7 +61,7 @@ export class AndroidManager {
     }
     const disk = await fsp.statfs(this.config.dataDir).catch(() => null)
     const ready = adb // API can manage external engines without emulator/KVM.
-    return { platform: this.config.platform, acceleration, accelerationDetails, kvm: this.config.platform === 'linux' && fileExists('/dev/kvm'),
+    return { platform: this.config.platform, hostArch:process.arch, acceleration, accelerationDetails, kvm: this.config.platform === 'linux' && fileExists('/dev/kvm'),
       emulator, adb, avdManager, installedImages, devices, dryRun: this.config.dryRun, ready,
       emulatorReady: adb && emulator && avdManager && acceleration && installedImages.length > 0,
       memory: { totalMb: Math.floor(os.totalmem() / 1048576), freeMb: Math.floor(os.freemem() / 1048576) },
@@ -115,7 +115,7 @@ export class AndroidManager {
     const input = updateProfileSchema.parse(raw)
     return this.queue.run(async () => {
       const p = await this.require(id); await this.refresh(p)
-      if (p.status === 'running' || p.status === 'starting') throw new Error('Desligue o Android antes de editar sua configuração')
+      if ((p.status === 'running' || p.status === 'starting') && (input.settings || input.proxy)) throw new Error('Desligue o Android antes de editar sua configuração')
       if ((p.engine ?? 'android-emulator') !== 'android-emulator' && (input.settings || input.proxy?.type !== undefined && input.proxy.type !== 'none')) throw new Error('Configure hardware e rede diretamente no motor externo')
       if (input.proxy && input.proxy.type !== 'none' && input.proxy.type !== 'http') throw new Error('Somente proxy HTTP está disponível neste motor')
       Object.assign(p, input, { updatedAt: now() }); await this.store.save(p); return this.sanitize(p)
@@ -203,6 +203,7 @@ export class AndroidManager {
   private imageDir(p: AndroidProfile) { return path.join(this.config.sdkRoot, ...p.systemImage.split(';')) }
   private async ensureAvd(p: AndroidProfile) {
     if (this.config.dryRun) return
+    if ((p.systemImage.endsWith(';arm64-v8a') && process.arch !== 'arm64') || (p.systemImage.endsWith(';x86_64') && process.arch !== 'x64')) throw new Error('A arquitetura da imagem não corresponde ao computador. Use x86_64 em PCs Intel/AMD ou arm64-v8a em computadores ARM64.')
     if (!fileExists(path.join(this.imageDir(p), 'package.xml'))) throw new Error(`Imagem Android não instalada: ${p.systemImage}`)
     const ini = path.join(this.config.avdHome, `${p.avdName}.ini`)
     if (fileExists(ini)) return
