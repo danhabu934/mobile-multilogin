@@ -84,7 +84,7 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     setMessage('')
     try {
       const queued = queueLoginAssist(profileId, startUrl)
-      setMessage(`Navegador persistente preparado. Comando de abertura adicionado à fila do worker (${queued} pendente${queued === 1 ? '' : 's'}).`)
+      setMessage(`Configuração local preparada. Comando armazenado no painel, sem execução confirmada (${queued} pendente${queued === 1 ? '' : 's'}).`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível preparar o login assistido.')
     }
@@ -120,7 +120,7 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
       const date = new Date().toISOString().slice(0, 10)
       downloadSnapshot(`${profile.id.toLowerCase()}-${date}.nexo.json`, encrypted)
       ensurePersistentBrowser(profile.id)
-      setMessage('Snapshot criptografado criado. O worker também recebeu a preparação do navegador persistente.')
+      setMessage('Snapshot criptografado criado. A configuração foi preparada localmente; não é um backup do Android.')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Não foi possível criar o snapshot.')
     } finally {
@@ -228,7 +228,7 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
 
   return <div className="modal-layer"><div className="modal" style={{width:'min(760px,calc(100vw - 30px))'}}>
     <div className="modal-head">
-      <div><p className="eyebrow">PROFILE RESTORE</p><h2>Sessão persistente e snapshot</h2></div>
+      <div><p className="eyebrow">PROFILE RESTORE</p><h2>Dados portáveis do painel</h2></div>
       <button className="icon-button" onClick={onClose}><X size={20}/></button>
     </div>
 
@@ -240,7 +240,7 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
     </div>
 
     <div style={{padding:'0 24px 14px'}}>
-      <div className="info-box" style={{margin:0}}><ShieldCheck size={19}/><span><strong>Persistência por perfil</strong><small>O worker usa um diretório Chromium fixo e isolado por perfil. Depois do login normal, o estado desse navegador permanece entre reinicializações. O arquivo exportável contém apenas configuração e dados portáveis filtrados.</small></span></div>
+      <div className="info-box" style={{margin:0}}><ShieldCheck size={19}/><span><strong>Persistência por perfil</strong><small>Este arquivo contém configuração e dados portáveis do painel. Não é um backup do Android. Use a aba Backups no aparelho para copiar seu disco completo.</small></span></div>
     </div>
 
     {mode === 'login' && <form onSubmit={loginAssist}>
@@ -248,10 +248,10 @@ export default function ProfileRestoreModal({ profiles, imports, initialProfileI
         <label>Perfil<select value={profileId} onChange={e => changeProfile(e.target.value)}>{profiles.map(item => <option key={item.id} value={item.id}>{item.name} · {item.id}</option>)}</select></label>
         <label>Site para abrir<input value={startUrl} onChange={e => setStartUrl(e.target.value)} placeholder="https://www.tiktok.com/"/></label>
         <div className="review-row full"><span>Diretório persistente</span><strong>{profileId ? `/var/lib/nexo/profiles/${profileId}/chromium` : 'Selecione um perfil'}</strong></div>
-        <div className="warning full"><AlertTriangle size={18}/><span>O primeiro acesso é autenticado normalmente pelo usuário. Depois, o worker reabre o mesmo perfil Chromium e preserva o estado criado dentro daquele ambiente.</span></div>
+        <div className="warning full"><AlertTriangle size={18}/><span>Esta operação prepara dados locais. A fila de navegador Chromium ainda não é executada pelo worker Android. Abra sites no Android pela aba Tela do aparelho.</span></div>
       </div>
       {error && <Result tone="error" text={error}/>} {message && <Result tone="success" text={message}/>} 
-      <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={!profileId}><LogIn size={16}/> Preparar e abrir</button></div>
+      <div className="modal-actions"><span/><button type="button" className="ghost" onClick={onClose}>Fechar</button><button className="primary" disabled={!profileId}><LogIn size={16}/> Preparar configuração local</button></div>
     </form>}
 
     {mode === 'paste' && <form onSubmit={pasteCookies}>
@@ -304,3 +304,4 @@ function Result({ tone, text }: { tone: 'error' | 'success', text: string }) {
   const ok = tone === 'success'
   return <div style={{margin:'0 24px 12px', padding:12, display:'flex', gap:9, alignItems:'flex-start', border:`1px solid ${ok ? '#1d5a49' : '#663141'}`, borderRadius:9, background:ok ? '#0d2a23' : '#25131a', color:ok ? '#a8efd2' : '#ff9aaa', fontSize:11}}>{ok ? <CheckCircle2 size={17}/> : <AlertTriangle size={17}/>}<span>{text}</span></div>
 }
+

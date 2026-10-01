@@ -9,3 +9,6 @@ worker/node_modules
 !.env.example
 !worker/.env.example
 .DS_Store
+
+
+*.tsbuildinfo

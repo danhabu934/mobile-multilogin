@@ -1,97 +1,13 @@
-import crypto from 'node:crypto'
-import express, { type NextFunction, type Request, type Response } from 'express'
-import { ZodError } from 'zod'
 import { AndroidManager } from './android-manager.js'
 import { getConfig } from './config.js'
-import { createProfileSchema, profileIdSchema } from './schemas.js'
 import { ProfileStore } from './store.js'
-import { hydrateSerialGuarded } from './cookie-hydrator.js'
-
+import { createApp } from './app.js'
 const config = getConfig()
-const store = new ProfileStore(config.profileDir, config.encryptionKey)
-const manager = new AndroidManager(config, store)
+const manager = new AndroidManager(config, new ProfileStore(config.profileDir, config.encryptionKey))
 await manager.init()
-
-const app = express()
-app.disable('x-powered-by')
-const allowedOrigins = new Set((process.env.WORKER_ALLOWED_ORIGINS ?? [
-  'https://mobile-multilogin.vercel.app',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-].join(',')).split(',').map(origin => origin.trim()).filter(Boolean))
-
-app.use((req, res, next) => {
-  const origin = req.headers.origin
-  if (origin && allowedOrigins.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin)
-    res.setHeader('Vary', 'Origin')
-    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type')
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Private-Network', 'true')
-  }
-  if (req.method === 'OPTIONS') return res.sendStatus(204)
-  next()
+const server = createApp(config, manager).listen(config.port, config.host, () => {
+  console.log(`Nexo Worker: http://${config.host}:${config.port}`)
+  console.log(`Mode: ${config.dryRun ? 'SIMULATION (no real Android operations)' : 'devices'}`)
 })
-app.use(express.json({ limit: '64kb' }))
-
-function authenticate(req: Request, res: Response, next: NextFunction) {
-  const supplied = req.headers.authorization?.replace(/^Bearer\s+/i, '') ?? ''
-  const validLength = supplied.length === config.apiToken.length
-  const valid = validLength && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(config.apiToken))
-  if (!valid) return res.status(401).json({ error: 'Unauthorized' })
-  next()
-}
-
-app.get('/health', async (_req, res) => {
-  const capabilities = await manager.capabilities()
-  res.status(capabilities.ready ? 200 : 503).json({ service: 'nexo-android-worker', version: '0.1.0', capabilities })
-})
-
-app.use('/v1', authenticate)
-
-app.get('/v1/profiles', async (_req, res) => res.json({ profiles: await manager.list() }))
-
-app.post('/v1/profiles', async (req, res) => {
-  const input = createProfileSchema.parse(req.body)
-  res.status(201).json({ profile: await manager.create(input) })
-})
-
-app.get('/v1/profiles/:id', async (req, res) => {
-  const id = profileIdSchema.parse(req.params.id)
-  const profile = await manager.get(id)
-  if (!profile) return res.status(404).json({ error: 'Profile not found' })
-  res.json({ profile })
-})
-
-app.post('/v1/profiles/:id/start', async (req, res) => {
-  const id = profileIdSchema.parse(req.params.id)
-  res.status(202).json({ profile: await manager.start(id) })
-})
-
-app.post('/v1/profiles/:id/stop', async (req, res) => {
-  const id = profileIdSchema.parse(req.params.id)
-  res.json({ profile: await manager.stop(id) })
-})
-
-app.post('/v1/hydrate', async (req, res) => {
-  const { cookies, serial } = req.body
-  try {
-    const result = await hydrateSerialGuarded(cookies, { serial })
-    res.json(result)
-  } catch (e: any) {
-    res.status(500).json({ ok: false, error: e.message })
-  }
-})
-
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  if (error instanceof ZodError) return res.status(400).json({ error: 'Invalid request', details: error.issues })
-  const message = error instanceof Error ? error.message : 'Internal worker error'
-  const status = message === 'Profile not found' ? 404
-    : message === 'Profile already exists' || message.startsWith('Feche outro Android') || message.startsWith('Este Android já') || message.startsWith('Memória livre insuficiente') ? 409 : 500
-  res.status(status).json({ error: message })
-})
-
-app.listen(config.port, config.host, () => {
-  console.log(`Nexo Android Worker listening on http://${config.host}:${config.port}`)
-  console.log(`Mode: ${config.dryRun ? 'dry-run' : 'android'}`)
-})
+server.on('error', error => { console.error(error.message); process.exitCode = 1 })
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => { server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref() })

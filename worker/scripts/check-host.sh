@@ -13,7 +13,8 @@ check() {
 }
 
 failures=0
-check test -c /dev/kvm || failures=$((failures + 1))
+check test -r /dev/kvm || failures=$((failures + 1))
+check test -w /dev/kvm || failures=$((failures + 1))
 check test -x "$SDK_ROOT/emulator/emulator" || failures=$((failures + 1))
 check test -x "$SDK_ROOT/platform-tools/adb" || failures=$((failures + 1))
 check test -x "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager" || failures=$((failures + 1))
@@ -24,3 +25,4 @@ if [ "$failures" -gt 0 ]; then
 fi
 
 echo "Host is ready for the Android worker."
+

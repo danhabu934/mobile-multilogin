@@ -1,13 +1,16 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react'
+import DeviceConsole from './DeviceConsole'
+import { workerClient, downloadJson } from './workerClient'
+import type { Catalogue, DeviceSettings, WorkerApi } from './workerClient'
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Activity, AlertTriangle, AppWindow, Boxes, CheckCircle2, ChevronDown,
-  CircleDollarSign, Cloud, Copy, Download, Ellipsis, ExternalLink, FileJson,
-  Filter, FolderKanban, Gauge, Globe2, HardDrive, LayoutGrid, Menu,
+  Activity, AlertTriangle, CheckCircle2, ChevronDown,
+  Cloud, Download, ExternalLink, FileJson,
+  Filter, Gauge, Globe2, HardDrive, LayoutGrid, Menu,
   MoreHorizontal, Play, Plus, Search, Server, Settings, ShieldCheck,
-  Smartphone, Square, Trash2, Upload, Users, Wifi, X, Zap
+  Smartphone, Square, Trash2, Upload, Wifi, X, Zap
 } from 'lucide-react'
 
-type Status = 'ready' | 'running' | 'offline'
+type Status = 'ready' | 'starting' | 'running' | 'offline' | 'error'
 type Profile = {
   id: string
   name: string
@@ -23,6 +26,14 @@ type Profile = {
   ip: string
   apps: number
   lastUsed: string
+  engine?: string
+  serial?: string
+  instanceName?: string
+  systemImage?: string
+  deviceId?: string
+  settings?: DeviceSettings
+  lastError?: string
+  notes?: string
 }
 
 type WorkerStatus = 'created' | 'starting' | 'running' | 'stopped' | 'error'
@@ -36,6 +47,12 @@ type WorkerProfile = {
   createdAt: string
   updatedAt: string
   lastError?: string
+  engine?: string
+  serial?: string
+  instanceName?: string
+  group?: string
+  settings?: DeviceSettings
+  notes?: string
 }
 type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error'
 
@@ -77,43 +94,29 @@ type ImportAnalysis = {
 
 type JsonRecord = Record<string, unknown>
 
-const seed: Profile[] = [
-  { id: 'NX-1048', name: 'Operação principal', group: 'TikTok', device: 'Pixel 8', android: 'Android 14', status: 'ready', proxyType: 'SOCKS5', proxyHost: 'br.proxy.local', proxyPort: '1080', proxyUser: '', proxyPassword: '', ip: 'São Paulo, BR', apps: 3, lastUsed: 'Hoje, 02:14' },
-  { id: 'NX-1047', name: 'Conteúdo secundário', group: 'TikTok', device: 'Pixel 7 Pro', android: 'Android 13', status: 'offline', proxyType: 'HTTP', proxyHost: '—', proxyPort: '', proxyUser: '', proxyPassword: '', ip: 'Sem proxy', apps: 2, lastUsed: 'Ontem, 21:40' },
-  { id: 'NX-1046', name: 'Atendimento mobile', group: 'Clientes', device: 'Galaxy S23', android: 'Android 14', status: 'running', proxyType: 'SOCKS5', proxyHost: 'us.proxy.local', proxyPort: '1080', proxyUser: '', proxyPassword: '', ip: 'Miami, US', apps: 5, lastUsed: 'Em uso agora' },
-]
-
-const nav = [
-  { label: 'Perfis', icon: Smartphone, active: true },
-  { label: 'Grupos', icon: FolderKanban },
-  { label: 'Aplicativos', icon: AppWindow },
-  { label: 'Recursos', icon: Boxes },
-  { label: 'Servidores', icon: Server },
-]
-
-const statusLabel: Record<Status, string> = { ready: 'Pronto', running: 'Em execução', offline: 'Desligado' }
+const statusLabel: Record<Status, string> = { ready: 'Pronto', running: 'Em execução', offline: 'Desligado', starting: 'Iniciando', error: 'Erro' }
 const sensitiveKeyPattern = /(session|sessid|sessionid|auth|token|jwt|bearer|credential|login|refresh|access[_-]?token|sid|sso|csrf|xsrf|ticket|secret|pass|oauth)/i
 const safePreferencePattern = /(lang|locale|language|theme|consent|preference|prefs|timezone|time_zone|tz|currency|country|region|analytics|utm|campaign|device|screen|layout|appearance)/i
 
 function workerToProfile(profile: WorkerProfile): Profile {
-  const status: Status = profile.status === 'running' || profile.status === 'starting'
-    ? 'running'
-    : profile.status === 'created' ? 'ready' : 'offline'
+  const status: Status = profile.status === 'created' ? 'ready' : profile.status === 'stopped' ? 'offline' : profile.status
   const androidApi = profile.systemImage.match(/android-(\d+)/)?.[1]
   return {
     id: profile.id,
     name: profile.displayName,
-    group: 'Android local',
+    group: profile.group || 'Android local',
     device: profile.deviceId.replaceAll('_', ' '),
-    android: androidApi ? `Android ${androidApi}` : 'Android',
+    android: profile.engine && profile.engine !== 'android-emulator' ? 'Android do dispositivo' : androidApi ? `Android ${{'33':'13','34':'14','35':'15','36':'16'}[androidApi] ?? `API ${androidApi}`}` : 'Android',
     status,
     proxyType: profile.proxy.type === 'none' ? 'SEM PROXY' : profile.proxy.type.toUpperCase(),
     proxyHost: profile.proxy.host ?? '—',
     proxyPort: profile.proxy.port ? String(profile.proxy.port) : '',
     proxyUser: profile.proxy.username ?? '',
     proxyPassword: '',
-    ip: profile.proxy.host ? `${profile.proxy.host}:${profile.proxy.port}` : 'Conexão direta',
-    apps: 0,
+    ip: profile.proxy.host ? `Proxy ${profile.proxy.host}:${profile.proxy.port} · saída não verificada` : 'Conexão direta',
+    apps: -1,
+    engine: profile.engine ?? 'android-emulator', serial: profile.serial, instanceName: profile.instanceName, settings: profile.settings,
+    systemImage: profile.systemImage, deviceId: profile.deviceId, lastError: profile.lastError, notes: profile.notes,
     lastUsed: profile.status === 'running' ? 'Em uso agora' : new Date(profile.updatedAt).toLocaleString('pt-BR'),
   }
 }
@@ -211,11 +214,11 @@ function sanitizeImport(payload: unknown, fileName: string): ImportAnalysis {
 function App() {
   const [profiles, setProfiles] = useState<Profile[]>(() => {
     const stored = localStorage.getItem('nexo-profiles')
-    return stored ? JSON.parse(stored) : seed
+    try { return stored ? JSON.parse(stored) : [] } catch { return [] }
   })
   const [imports, setImports] = useState<ImportRecord[]>(() => {
     const stored = localStorage.getItem('nexo-safe-imports')
-    return stored ? JSON.parse(stored) : []
+    try { return stored ? JSON.parse(stored) : [] } catch { return [] }
   })
   const [query, setQuery] = useState('')
   const [group, setGroup] = useState('Todos os grupos')
@@ -232,6 +235,9 @@ function App() {
   const [workerToken, setWorkerToken] = useState(() => sessionStorage.getItem('nexo-worker-token') || '')
   const [connectionError, setConnectionError] = useState('')
   const [busyIds, setBusyIds] = useState<string[]>([])
+  const [catalogue, setCatalogue] = useState<Catalogue | null>(null)
+  const [statusFilter, setStatusFilter] = useState('all')
+  const api = useMemo(() => { try { return workerClient(workerUrl, workerToken) } catch { return workerClient('http://127.0.0.1:8787', workerToken) } }, [workerUrl, workerToken])
 
   useEffect(() => localStorage.setItem('nexo-profiles', JSON.stringify(profiles)), [profiles])
   useEffect(() => localStorage.setItem('nexo-safe-imports', JSON.stringify(imports)), [imports])
@@ -250,24 +256,12 @@ function App() {
   const groups = useMemo(() => ['Todos os grupos', ...Array.from(new Set(profiles.map(p => p.group)))], [profiles])
   const filtered = profiles.filter(p => {
     const matchesQuery = `${p.name} ${p.id} ${p.group}`.toLowerCase().includes(query.toLowerCase())
-    return matchesQuery && (group === 'Todos os grupos' || p.group === group)
+    return matchesQuery && (group === 'Todos os grupos' || p.group === group) && (statusFilter === 'all' || p.status === statusFilter)
   })
 
   const toggle = (id: string) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
   const notify = (message: string) => setToast(message)
-  const workerRequest = async <T,>(path: string, options: RequestInit = {}, url = workerUrl, token = workerToken): Promise<T> => {
-    const response = await fetch(`${normalizeWorkerUrl(url)}${path}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(options.headers ?? {}),
-      },
-    })
-    const body = await response.json().catch(() => ({})) as { error?: string } & T
-    if (!response.ok) throw new Error(body.error || `Erro HTTP ${response.status}`)
-    return body
-  }
+  const workerRequest = useCallback(async <T,>(path: string, options: RequestInit = {}, url = workerUrl, token = workerToken): Promise<T> => workerClient(normalizeWorkerUrl(url), token)<T>(path, options), [workerUrl, workerToken])
   const connectWorker = async (url: string, token: string, closeOnSuccess = true) => {
     const normalizedUrl = normalizeWorkerUrl(url)
     if (!normalizedUrl || token.trim().length < 32) {
@@ -279,6 +273,7 @@ function App() {
     setConnectionError('')
     try {
       await workerRequest('/health', {}, normalizedUrl, '')
+      setCatalogue(await workerRequest<Catalogue>('/v1/capabilities', {}, normalizedUrl, token.trim()))
       const data = await workerRequest<{ profiles: WorkerProfile[] }>('/v1/profiles', {}, normalizedUrl, token.trim())
       setWorkerUrl(normalizedUrl)
       setWorkerToken(token.trim())
@@ -294,24 +289,31 @@ function App() {
       setShowConnection(true)
     }
   }
-  const refreshProfiles = async () => {
+  const refreshProfiles = useCallback(async () => {
     if (connection !== 'connected') return
-    const data = await workerRequest<{ profiles: WorkerProfile[] }>('/v1/profiles')
+    const data = await workerRequest<{ profiles: WorkerProfile[]; warnings: string[] }>('/v1/profiles')
     setProfiles(data.profiles.map(workerToProfile))
-  }
+    setConnectionError(data.warnings.join(' '))
+  }, [connection, workerRequest])
+  useEffect(() => {
+    if (connection !== 'connected') return
+    let disposed = false, timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      try { await refreshProfiles() } catch (e) { if (!disposed) setConnectionError(e instanceof Error ? e.message : 'Worker indisponível') }
+      if (!disposed) timer = setTimeout(poll, 5000)
+    }
+    timer = setTimeout(poll, 5000)
+    return () => { disposed = true; clearTimeout(timer) }
+  }, [connection, refreshProfiles])
   const setStatus = async (ids: string[], status: Status) => {
     if (connection !== 'connected') {
       setShowConnection(true)
       notify('Conecte o worker para controlar o celular real')
       return
     }
-    if (status === 'running' && ids.length > 1) {
-      notify('Para manter o desempenho, inicie apenas um Android por vez.')
-      return
-    }
     setBusyIds(list => [...new Set([...list, ...ids])])
     try {
-      await Promise.all(ids.map(id => workerRequest(`/v1/profiles/${id}/${status === 'running' ? 'start' : 'stop'}`, { method: 'POST' })))
+      for (const id of ids) await workerRequest(`/v1/profiles/${id}/${status === 'running' ? 'start' : 'stop'}`, { method: 'POST' })
       await refreshProfiles()
       notify(status === 'running' ? 'Celular Android iniciado' : 'Celular Android desligado')
     } catch (error) {
@@ -321,15 +323,15 @@ function App() {
       setBusyIds(list => list.filter(id => !ids.includes(id)))
     }
   }
-  const removeSelected = () => {
-    if (!selected.length) return
-    if (connection === 'connected') {
-      notify('Exclusão real será habilitada na próxima etapa')
-      return
-    }
-    setProfiles(list => list.filter(p => !selected.includes(p.id)))
-    setSelected([])
-    notify('Perfis removidos do painel')
+  const removeSelected = async () => {
+    if (!selected.length || connection !== 'connected') return
+    if (!window.confirm(`Excluir ${selected.length} perfil(s)? Discos de Android Emulator serão apagados; dispositivos externos serão apenas desvinculados.`)) return
+    try { for (const id of selected) await workerRequest(`/v1/profiles/${id}`, {method:'DELETE'}); setSelected([]); await refreshProfiles(); notify('Perfis excluídos do worker') }
+    catch (e) { notify(e instanceof Error ? e.message : 'Falha ao excluir'); await refreshProfiles().catch(() => undefined) }
+  }
+  const testProfileProxy = async (ids: string[]) => {
+    try { for (const id of ids) { const result = await workerRequest<{ip:string;scope:string}>(`/v1/profiles/${id}/proxy/test`, {method:'POST'}); notify(`${id}: saída HTTP ${result.ip}. ${result.scope}`) } }
+    catch(e) { notify(e instanceof Error ? e.message : 'Falha no proxy') }
   }
   const openImporter = (profileId = '') => {
     setImportProfileId(profileId)
@@ -352,29 +354,31 @@ function App() {
         }
     await workerRequest('/v1/profiles', {
       method: 'POST',
-      body: JSON.stringify({ id: profile.id, displayName: profile.name, proxy }),
+      body: JSON.stringify({ id: profile.id, displayName: profile.name, proxy, group:profile.group, notes:profile.notes, engine:profile.engine, serial:profile.serial || undefined, instanceName:profile.instanceName || undefined, systemImage:profile.systemImage || undefined, deviceId:profile.deviceId || undefined, settings:profile.settings }),
     })
     await refreshProfiles()
   }
 
   return (
     <div className="app-shell">
-      <Sidebar open={sidebar} close={() => setSidebar(false)} connection={connection} onConnect={() => setShowConnection(true)} />
+      <Sidebar open={sidebar} close={() => setSidebar(false)} connection={connection} count={profiles.length} onConnect={() => setShowConnection(true)} />
       <main>
         <header className="topbar">
           <button className="icon-button mobile-menu" onClick={() => setSidebar(true)} aria-label="Abrir menu"><Menu size={21}/></button>
           <div><p className="eyebrow">AMBIENTES ANDROID</p><h1>Perfis móveis</h1></div>
           <div className="top-actions">
             <button className="capacity" onClick={() => setShowConnection(true)} style={{cursor:'pointer'}}><span><Server size={15}/> Worker</span><strong style={{color:connection === 'connected' ? '#5fe0ad' : connection === 'connecting' ? '#ffc06d' : '#ff8fa3'}}>{connection === 'connected' ? 'Conectado' : connection === 'connecting' ? 'Conectando' : 'Desconectado'}</strong></button>
-            <button className="primary" onClick={() => setShowNew(true)}><Plus size={18}/> Novo perfil</button>
+            <button className="primary" onClick={() => connection === 'connected' ? setShowNew(true) : setShowConnection(true)}><Plus size={18}/> Novo perfil</button>
           </div>
         </header>
 
+        {connectionError && <p className="console-error" role="alert">{connectionError}</p>}
+        {catalogue?.dryRun && <p className="console-error">Modo de simulação: nenhum Android real é iniciado. Configure ANDROID_DRY_RUN=false no worker.</p>}
         <section className="stats-grid">
           <Stat icon={Smartphone} label="Total de perfis" value={profiles.length.toString()} detail="Ambientes isolados" tone="blue"/>
           <Stat icon={Zap} label="Em execução" value={profiles.filter(p => p.status === 'running').length.toString()} detail="Conectados agora" tone="green"/>
-          <Stat icon={Wifi} label="Com proxy" value={profiles.filter(p => p.proxyHost !== '—').length.toString()} detail="Rotas configuradas" tone="violet"/>
-          <Stat icon={HardDrive} label="Armazenamento" value="18.4 GB" detail="de 50 GB utilizados" tone="orange"/>
+          <Stat icon={Wifi} label="Com proxy" value={profiles.filter(p => p.proxyType !== 'SEM PROXY').length.toString()} detail="Rotas configuradas" tone="violet"/>
+          <Stat icon={HardDrive} label="Armazenamento" value={catalogue?.disk ? `${(catalogue.disk.freeBytes / 1024**3).toFixed(1)} GB` : "—"} detail="Livres no disco do worker" tone="orange"/>
         </section>
 
         <section className="workspace">
@@ -382,11 +386,11 @@ function App() {
             <div className="filters">
               <label className="select-wrap"><LayoutGrid size={17}/><select value={group} onChange={e => setGroup(e.target.value)}>{groups.map(g => <option key={g}>{g}</option>)}</select><ChevronDown size={15}/></label>
               <label className="search"><Search size={17}/><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Buscar nome, ID ou grupo"/></label>
-              <button className="secondary"><Filter size={17}/> Filtros</button>
+              <label className="select-wrap"><Filter size={17}/><select aria-label="Filtrar status" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="all">Todos os estados</option>{Object.entries(statusLabel).map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
             </div>
             <div style={{display:'flex', gap:8}}>
               <button className="secondary" onClick={() => openImporter()}><Upload size={17}/> Importar perfil</button>
-              <button className="secondary"><Download size={17}/> Exportar</button>
+              <button className="secondary" onClick={()=>downloadJson("nexo-configuracoes.json", {kind:"nexo-configurations",version:1,profiles:profiles.map(p=>({...p,proxyPassword:undefined})),notice:"Configurações do painel; não contém discos nem backups do Android."})}><Download size={17}/> Exportar configuração</button>
             </div>
           </div>
 
@@ -395,14 +399,14 @@ function App() {
             <span className="divider"/>
             <button disabled={selected.some(id => busyIds.includes(id))} onClick={() => void setStatus(selected, 'running')}><Play size={15}/> Iniciar</button>
             <button disabled={selected.some(id => busyIds.includes(id))} onClick={() => void setStatus(selected, 'offline')}><Square size={14}/> Desligar</button>
-            <button onClick={() => notify('Verificação de proxy iniciada')}><Wifi size={15}/> Verificar proxy</button>
-            <button className="danger" onClick={removeSelected}><Trash2 size={15}/> Excluir</button>
+            <button onClick={() => void testProfileProxy(selected)}><Wifi size={15}/> Verificar proxy</button>
+            <button className="danger" onClick={() => void removeSelected()}><Trash2 size={15}/> Excluir</button>
           </div>
 
           <div className="table-wrap">
             <table>
               <thead><tr>
-                <th><input type="checkbox" checked={filtered.length > 0 && selected.length === filtered.length} onChange={e => setSelected(e.target.checked ? filtered.map(p => p.id) : [])}/></th>
+                <th><input type="checkbox" checked={filtered.length > 0 && filtered.every(p=>selected.includes(p.id))} onChange={e => setSelected(e.target.checked ? filtered.map(p => p.id) : [])}/></th>
                 <th>Perfil</th><th>Dispositivo</th><th>Rede</th><th>Aplicativos</th><th>Último uso</th><th>Status</th><th></th>
               </tr></thead>
               <tbody>{filtered.map(profile => (
@@ -411,7 +415,7 @@ function App() {
                   <td><button className="profile-cell" onClick={() => setDetail(profile)}><span className="phone-avatar"><Smartphone size={20}/></span><span><strong>{profile.name}</strong><small>{profile.id} · {profile.group}</small></span></button></td>
                   <td><strong>{profile.device}</strong><small>{profile.android}</small></td>
                   <td><span className="proxy"><ShieldCheck size={14}/>{profile.proxyType}</span><small>{profile.ip}</small></td>
-                  <td><strong>{profile.apps}</strong><small>instalados</small></td>
+                  <td><strong>{profile.apps < 0 ? '—' : profile.apps}</strong><small>Consultar na aba Apps</small></td>
                   <td><span>{profile.lastUsed}</span></td>
                   <td><span className={`status ${profile.status}`}><i/>{statusLabel[profile.status]}</span></td>
                   <td><div className="row-actions"><button title="Iniciar" disabled={busyIds.includes(profile.id)} onClick={() => void setStatus([profile.id], 'running')}><Play size={16}/></button><button title="Detalhes" onClick={() => setDetail(profile)}><MoreHorizontal size={18}/></button></div></td>
@@ -420,30 +424,25 @@ function App() {
             </table>
             {!filtered.length && <div className="empty"><Search size={28}/><strong>Nenhum perfil encontrado</strong><span>Tente outro termo ou crie um novo ambiente.</span></div>}
           </div>
-          <div className="table-footer"><span>Mostrando {filtered.length} de {profiles.length} perfis</span><button className="ghost" onClick={() => void refreshProfiles()} disabled={connection !== 'connected'}>Atualizar worker <i className={connection === 'connected' ? 'live-dot' : ''}/></button></div>
+          <div className="table-footer"><span>Mostrando {filtered.length} de {profiles.length} perfis</span><button className="ghost" onClick={() => void refreshProfiles().catch(e=>notify(e instanceof Error ? e.message : 'Falha ao atualizar'))} disabled={connection !== 'connected'}>Atualizar worker <i className={connection === 'connected' ? 'live-dot' : ''}/></button></div>
         </section>
       </main>
 
-      {showNew && <NewProfile onClose={() => setShowNew(false)} onSave={async profile => { await createWorkerProfile(profile); setShowNew(false); notify('Celular Android criado no worker') }}/>} 
-      {showImport && <SessionImporter profiles={profiles} initialProfileId={importProfileId} onClose={() => setShowImport(false)} onSave={record => { setImports(list => [record, ...list].slice(0, 50)); setShowImport(false); notify('Dados não sensíveis importados para o perfil') }}/>} 
-      {detail && <Detail profile={profiles.find(p => p.id === detail.id) || detail} lastImport={imports.find(item => item.profileId === detail.id)} onClose={() => setDetail(null)} onStart={() => void setStatus([detail.id], 'running')} onImport={() => { openImporter(detail.id); setDetail(null) }} notify={notify}/>} 
-      {showConnection && <ConnectionModal url={workerUrl} token={workerToken} state={connection} error={connectionError} onClose={() => setShowConnection(false)} onConnect={(url, token) => void connectWorker(url, token)}/>} 
+      {showNew && <NewProfile catalogue={catalogue} api={api} onClose={() => setShowNew(false)} onSave={async profile => { await createWorkerProfile(profile); setShowNew(false); notify('Celular Android criado no worker') }}/>}
+      {showImport && <SessionImporter profiles={profiles} initialProfileId={importProfileId} onClose={() => setShowImport(false)} onSave={record => { setImports(list => [record, ...list].slice(0, 50)); setShowImport(false); notify('Dados não sensíveis importados para o perfil') }}/>}
+      {detail && <Detail profile={profiles.find(p => p.id === detail.id) || detail} api={api} onRefresh={refreshProfiles} lastImport={imports.find(item => item.profileId === detail.id)} onClose={() => setDetail(null)} onStart={() => void setStatus([detail.id], 'running')} onImport={() => { openImporter(detail.id); setDetail(null) }} notify={notify}/>}
+      {showConnection && <ConnectionModal url={workerUrl} token={workerToken} state={connection} error={connectionError} onClose={() => setShowConnection(false)} onConnect={(url, token) => void connectWorker(url, token)}/>}
       {toast && <div className="toast"><ShieldCheck size={18}/>{toast}</div>}
     </div>
   )
 }
 
-function Sidebar({ open, close, connection, onConnect }: { open: boolean, close: () => void, connection: ConnectionState, onConnect: () => void }) {
-  return <>
-    {open && <button className="scrim" onClick={close} aria-label="Fechar menu"/>}
-    <aside className={open ? 'open' : ''}>
-      <div className="brand"><span><Smartphone size={22}/></span><div><strong>NEXO</strong><small>MOBILE</small></div></div>
-      <nav><p>GERENCIAMENTO</p>{nav.map(({label, icon: Icon, active}) => <button key={label} className={active ? 'active' : ''}><Icon size={19}/>{label}{active && <span className="nav-count">3</span>}</button>)}</nav>
-      <nav className="lower"><p>CONTA</p><button><Users size={19}/>Equipe</button><button><Activity size={19}/>Atividades</button><button><CircleDollarSign size={19}/>Plano e uso</button><button><Settings size={19}/>Configurações</button></nav>
-      <div className="server-card"><div><span className={connection === 'connected' ? 'pulse' : ''}/><strong>{connection === 'connected' ? 'Worker Android online' : 'Worker desconectado'}</strong></div><small>{connection === 'connected' ? 'Computador local pronto' : 'Conecte o serviço local'}</small><button onClick={onConnect}><Gauge size={15}/> Configurar conexão</button></div>
-      <div className="user"><span>DS</span><div><strong>Danhabu</strong><small>Administrador</small></div><Ellipsis size={18}/></div>
-    </aside>
-  </>
+function Sidebar({ open, close, connection, onConnect, count }: { open: boolean; close: () => void; connection: ConnectionState; onConnect: () => void; count: number }) {
+  return <>{open && <button className="scrim" onClick={close} aria-label="Fechar menu"/>}<aside className={open ? 'open' : ''}>
+    <div className="brand"><span><Smartphone size={22}/></span><div><strong>NEXO</strong><small>MOBILE</small></div></div>
+    <nav><p>GERENCIAMENTO</p><button className="active" onClick={close}><Smartphone size={19}/>Perfis<span className="nav-count">{count}</span></button><button onClick={onConnect}><Settings size={19}/>Conexão do worker</button></nav>
+    <div className="server-card"><div><span className={connection === 'connected' ? 'pulse' : ''}/><strong>{connection === 'connected' ? 'Worker conectado' : 'Worker desconectado'}</strong></div><small>Apps, diagnóstico e backups nos detalhes de cada perfil.</small><button onClick={onConnect}><Gauge size={15}/>Configurar conexão</button></div>
+  </aside></>
 }
 
 function Stat({ icon: Icon, label, value, detail, tone }: { icon: typeof Smartphone, label: string, value: string, detail: string, tone: string }) {
@@ -471,57 +470,29 @@ function ConnectionModal({ url, token, state, error, onClose, onConnect }: { url
   </div></div>
 }
 
-function NewProfile({ onClose, onSave }: { onClose: () => void, onSave: (p: Profile) => Promise<void> }) {
-  const [step, setStep] = useState(1)
-  const [checking, setChecking] = useState(false)
-  const [checked, setChecked] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const [form, setForm] = useState({ name: '', group: 'TikTok', device: 'Pixel 8', android: 'Android 15', proxyType: 'none', proxyHost: '', proxyPort: '', proxyUser: '', proxyPassword: '' })
-  const change = (key: string, value: string) => setForm(f => ({ ...f, [key]: value }))
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (step < 3) return setStep(s => s + 1)
-    setSaving(true)
-    setError('')
-    try {
-      await onSave({ ...form, id: `nx-${Date.now().toString(36).slice(-7)}`, status: 'ready', ip: checked ? 'Dados do proxy validados' : 'Não verificado', apps: 0, lastUsed: 'Nunca usado' })
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : 'Não foi possível criar o celular.')
-    } finally {
-      setSaving(false)
-    }
-  }
-  const check = () => { setChecking(true); setTimeout(() => { setChecking(false); setChecked(true) }, 850) }
-  return <div className="modal-layer"><div className="modal">
-    <div className="modal-head"><div><p className="eyebrow">NOVO AMBIENTE</p><h2>Criar perfil Android</h2></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
-    <div className="steps">{['Identificação','Dispositivo e rede','Revisão'].map((s,i) => <div className={step >= i+1 ? 'current' : ''} key={s}><span>{i+1}</span><small>{s}</small></div>)}</div>
-    <form onSubmit={submit}>
-      {step === 1 && <div className="form-grid">
-        <label className="full">Nome do perfil<input required autoFocus value={form.name} onChange={e => change('name', e.target.value)} placeholder="Ex.: Operação principal"/></label>
-        <label>Grupo<input value={form.group} onChange={e => change('group', e.target.value)} placeholder="TikTok"/></label>
-        <label>Observação<input placeholder="Opcional"/></label>
-        <div className="info-box full"><ShieldCheck size={19}/><span><strong>Dados isolados por perfil</strong><small>Aplicativos, arquivos e sessões ficam separados em um disco exclusivo.</small></span></div>
-      </div>}
-      {step === 2 && <div className="form-grid">
-        <label>Modelo<select value={form.device} onChange={e => change('device', e.target.value)}><option>Pixel 8</option><option>Pixel 7 Pro</option><option>Galaxy S23</option></select></label>
-        <label>Sistema<select value={form.android} onChange={e => change('android', e.target.value)}><option>Android 14</option><option>Android 13</option></select></label>
-        <label>Protocolo<select value={form.proxyType} onChange={e => change('proxyType', e.target.value)}><option value="none">Sem proxy</option><option value="http">HTTP</option><option value="https">HTTPS</option><option value="socks5" disabled>SOCKS5 (em breve)</option></select></label>
-        <label>Host<input value={form.proxyHost} onChange={e => change('proxyHost', e.target.value)} placeholder="proxy.exemplo.com"/></label>
-        <label>Porta<input value={form.proxyPort} onChange={e => change('proxyPort', e.target.value)} placeholder="1080"/></label>
-        <label>Usuário<input value={form.proxyUser} onChange={e => change('proxyUser', e.target.value)} placeholder="Opcional"/></label>
-        <label>Senha<input type="password" value={form.proxyPassword} onChange={e => change('proxyPassword', e.target.value)} placeholder="Opcional"/></label>
-        <button className={`proxy-check ${checked ? 'success' : ''}`} type="button" onClick={check} disabled={form.proxyType === 'none' || !form.proxyHost || !form.proxyPort || checking}>{checking ? 'Validando dados…' : checked ? 'Dados validados' : 'Validar proxy'}</button>
-      </div>}
-      {step === 3 && <div className="review">
-        <div className="device-preview"><span><Smartphone size={36}/></span><div><strong>{form.name}</strong><small>{form.device} · {form.android}</small></div></div>
-        <div className="review-row"><span>Grupo</span><strong>{form.group}</strong></div><div className="review-row"><span>Proxy</span><strong>{form.proxyHost ? `${form.proxyType} · ${form.proxyHost}:${form.proxyPort}` : 'Sem proxy'}</strong></div><div className="review-row"><span>Armazenamento</span><strong>Disco persistente isolado</strong></div>
-        <div className="warning"><Cloud size={18}/><span>O perfil será criado no worker Windows e abrirá como um celular Android real neste computador.</span></div>
-        {error && <div className="warning" style={{border:'1px solid #663141', background:'#25131a', color:'#ff9aaa'}}><AlertTriangle size={18}/><span>{error}</span></div>}
-      </div>}
-      <div className="modal-actions">{step > 1 && <button type="button" className="secondary" onClick={() => setStep(s => s-1)}>Voltar</button>}<span/><button type="button" className="ghost" onClick={onClose}>Cancelar</button><button className="primary" type="submit" disabled={saving}>{saving ? 'Criando celular…' : step === 3 ? 'Criar perfil' : 'Continuar'}</button></div>
-    </form>
-  </div></div>
+function NewProfile({ onClose, onSave, catalogue, api }: { onClose: () => void; onSave: (p: Profile) => Promise<void>; catalogue: Catalogue | null; api: WorkerApi }) {
+  const [saving,setSaving] = useState(false), [error,setError] = useState(''), [proxyResult,setProxyResult] = useState('')
+  const [form,setForm] = useState({name:'',group:'Android local',notes:'',engine:'android-emulator',serial:'',instanceName:'',deviceId:catalogue?.deviceId ?? 'pixel_7_pro',systemImage:catalogue?.installedImages[0] ?? catalogue?.systemImage ?? '',proxyType:'none',proxyHost:'',proxyPort:'',proxyUser:'',proxyPassword:''})
+  const [availableDevices,setAvailableDevices] = useState(catalogue?.devices ?? []), [adbAddress,setAdbAddress] = useState('127.0.0.1:5555')
+  const [settings,setSettings] = useState<DeviceSettings>(catalogue?.defaults ?? {memoryMb:3072,cores:2,heapMb:512,resolution:'540x960',density:240,gpu:'auto',cameraFront:'none',cameraBack:'emulated'})
+  const change=(key:string,value:string)=>{setForm(f=>({...f,[key]:value}));setProxyResult('')}
+  const proxy=()=>({type:form.proxyType,host:form.proxyHost || undefined,port:form.proxyPort ? Number(form.proxyPort) : undefined,username:form.proxyUser || undefined,password:form.proxyPassword || undefined})
+  const test=async()=>{setSaving(true);setError('');try{const result=await api<{ip:string;scope:string}>('/v1/proxy/test',{method:'POST',body:JSON.stringify(proxy())});setProxyResult(`Saída HTTP: ${result.ip}. ${result.scope}`)}catch(e){setError(e instanceof Error?e.message:'Falha no proxy')}finally{setSaving(false)}}
+  const submit=async(e:FormEvent)=>{e.preventDefault();setSaving(true);setError('');try{await onSave({...form,device:form.deviceId,android:form.systemImage,id:`nx-${crypto.randomUUID().slice(0,12)}`,status:'ready',ip:'Não verificado',apps:0,lastUsed:'Nunca usado',settings})}catch(e){setError(e instanceof Error?e.message:'Falha ao criar')}finally{setSaving(false)}}
+  return <div className="modal-layer"><div className="modal" style={{maxHeight:'92vh',overflowY:'auto'}}><div className="modal-head"><h2>Criar ou conectar Android</h2><button className="icon-button" onClick={onClose}><X size={20}/></button></div><form onSubmit={submit}><div className="form-grid">
+    <label>Nome<input required minLength={2} value={form.name} onChange={e=>change('name',e.target.value)}/></label><label>Grupo<input value={form.group} onChange={e=>change('group',e.target.value)}/></label>
+    <label className="full">Motor<select value={form.engine} onChange={e=>{change('engine',e.target.value);change('proxyType','none')}}><option value="android-emulator">Android Emulator — novo disco isolado</option><option value="bluestacks">BlueStacks — conectar instância existente</option><option value="physical">Android físico — conectar aparelho existente</option></select></label>
+    {form.engine==='android-emulator'?<>
+      <label>Modelo<select value={form.deviceId} onChange={e=>change('deviceId',e.target.value)}>{(catalogue?.deviceDefinitions ?? [{id:form.deviceId,name:form.deviceId}]).map(d=><option key={d.id} value={d.id}>{d.name}</option>)}</select></label>
+      <label>Imagem instalada<select required value={form.systemImage} onChange={e=>change('systemImage',e.target.value)}>{catalogue?.installedImages.length ? catalogue.installedImages.map(i=><option key={i}>{i}</option>):<option value="">Nenhuma imagem instalada</option>}</select></label>
+      <label>RAM (MB)<input type="number" required min={1536} max={16384} value={settings.memoryMb} onChange={e=>setSettings({...settings,memoryMb:Number(e.target.value)})}/></label><label>Núcleos<input type="number" min={1} max={16} required value={settings.cores} onChange={e=>setSettings({...settings,cores:Number(e.target.value)})}/></label>
+      <label>Resolução<select value={settings.resolution} onChange={e=>setSettings({...settings,resolution:e.target.value})}><option>540x960</option><option>720x1280</option><option>1080x1920</option></select></label><label>GPU<select value={settings.gpu} onChange={e=>setSettings({...settings,gpu:e.target.value})}><option value="auto">Automático</option><option value="host">GPU do computador</option><option value="software">Software</option><option value="swiftshader_indirect">SwiftShader legado</option></select></label>
+      <label>Proxy<select value={form.proxyType} onChange={e=>change('proxyType',e.target.value)}><option value="none">Sem proxy</option><option value="http">HTTP</option></select></label>
+      {form.proxyType!=='none'&&<><label>Host<input required value={form.proxyHost} onChange={e=>change('proxyHost',e.target.value)}/></label><label>Porta<input type="number" required min={1} max={65535} value={form.proxyPort} onChange={e=>change('proxyPort',e.target.value)}/></label><label>Usuário<input value={form.proxyUser} onChange={e=>change('proxyUser',e.target.value)}/></label><label>Senha<input type="password" value={form.proxyPassword} onChange={e=>change('proxyPassword',e.target.value)}/></label><button type="button" className="secondary" disabled={saving} onClick={()=>void test()}>Testar conexão HTTP</button></>}
+    </>:<><label className="full">Dispositivo ADB conectado<select required value={form.serial} onChange={e=>change('serial',e.target.value)}><option value="">Selecione</option>{availableDevices.filter(d=>d.state==='device').map(d=><option key={d.serial}>{d.serial}</option>)}</select></label><label>Endereço ADB do BlueStacks<input value={adbAddress} onChange={e=>setAdbAddress(e.target.value)} placeholder="127.0.0.1:porta"/></label><button type="button" className="secondary" disabled={saving} onClick={()=>{setSaving(true);setError('');void api('/v1/devices/connect',{method:'POST',body:JSON.stringify({serial:adbAddress})}).then(()=>api<Catalogue>('/v1/capabilities')).then(c=>{setAvailableDevices(c.devices);change('serial',adbAddress)}).catch(e=>setError(e instanceof Error?e.message:'Falha na conexão ADB')).finally(()=>setSaving(false))}}>Conectar ADB local</button>{form.engine==='bluestacks'&&<label className="full">Nome interno da instância para iniciar (opcional)<input value={form.instanceName} onChange={e=>change('instanceName',e.target.value)} placeholder="Ex.: Pie64 — copie da configuração do BlueStacks"/></label>}<p className="console-help full">Abra a instância e habilite ADB no BlueStacks ou autorize USB no celular. Hardware, câmera e rede são configurados no motor externo. O vínculo não cria um novo aparelho.</p></>}
+    <label className="full">Observação<input value={form.notes} onChange={e=>change('notes',e.target.value)}/></label>
+    {catalogue&&<p className="console-help full">Memória livre: {catalogue.memory.freeMb} MB de {catalogue.memory.totalMb} MB. Limite de emuladores: {catalogue.maxActiveEmulators}.</p>}{proxyResult&&<p className="console-message full">{proxyResult}</p>}{error&&<p role="alert" className="console-error full">{error}</p>}
+  </div><div className="modal-actions"><button type="button" className="ghost" onClick={onClose}>Cancelar</button><span/><button className="primary" disabled={saving || !catalogue}>{saving?'Executando…':form.engine==='android-emulator'?'Criar Android':'Conectar dispositivo'}</button></div></form></div></div>
 }
 
 function SessionImporter({ profiles, initialProfileId, onClose, onSave }: { profiles: Profile[], initialProfileId: string, onClose: () => void, onSave: (record: ImportRecord) => void }) {
@@ -629,16 +600,12 @@ function ImportMetric({label, value, tone}: {label: string, value: number, tone:
   return <div style={{padding:12, border:`1px solid ${safe ? '#1d5a49' : '#5b3340'}`, borderRadius:9, background:safe ? '#0d2a23' : '#24151b'}}><small style={{display:'block', color:safe ? '#69c9a5' : '#d58b9b', fontSize:9}}>{label}</small><strong style={{display:'block', marginTop:3, fontSize:18, color:safe ? '#a8efd2' : '#ffb5c2'}}>{value}</strong></div>
 }
 
-function Detail({ profile, lastImport, onClose, onStart, onImport, notify }: { profile: Profile, lastImport?: ImportRecord, onClose: () => void, onStart: () => void, onImport: () => void, notify: (s: string) => void }) {
-  return <div className="drawer-layer"><button className="scrim" onClick={onClose}/><section className="drawer">
-    <div className="drawer-head"><div className="phone-avatar large"><Smartphone size={24}/></div><div><h2>{profile.name}</h2><span>{profile.id} · {profile.group}</span></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
-    <div className="device-stage"><div className="mock-phone"><div className="notch"/><div className="android-screen"><span>{profile.android.replace('Android ', '')}</span><small>{profile.status === 'running' ? 'Conectando ao stream…' : 'Dispositivo desligado'}</small></div></div></div>
-    <div className="quick-actions"><button className="primary" onClick={onStart}><Play size={17}/>Iniciar celular</button><button className="secondary" onClick={() => notify('Snapshot solicitado')}><Copy size={17}/>Snapshot</button></div>
-    <div className="detail-section"><h3>Dispositivo</h3><div className="detail-grid"><span>Modelo<strong>{profile.device}</strong></span><span>Sistema<strong>{profile.android}</strong></span><span>Aplicativos<strong>{profile.apps} instalados</strong></span><span>Armazenamento<strong>6,1 GB</strong></span></div></div>
-    <div className="detail-section"><h3>Rede e segurança</h3><div className="network-card"><ShieldCheck size={22}/><div><strong>{profile.proxyType} · {profile.proxyHost}</strong><small>{profile.ip} · Kill switch preparado</small></div><button onClick={() => notify('Teste de proxy enviado')}><Wifi size={17}/></button></div></div>
-    <div className="detail-section"><h3>Navegador do perfil</h3><div className="apps-placeholder" style={{alignItems:'flex-start'}}><Globe2 size={23}/><div style={{flex:1}}><strong>Dados portáveis não sensíveis</strong><small>{lastImport ? `${lastImport.safeCookieCount} cookies e ${lastImport.safeStorageCount} preferências importadas · ${lastImport.host}` : 'Nenhum pacote seguro importado ainda.'}</small><button className="secondary" style={{marginTop:10}} onClick={onImport}><Upload size={15}/> Importar dados</button></div></div></div>
-    <div className="detail-section"><h3>Aplicativos</h3><div className="apps-placeholder"><AppWindow size={23}/><div><strong>Gerencie apps no Android</strong><small>Play Store e instalação de APK serão executadas pelo worker.</small></div></div></div>
+function Detail({ profile, lastImport, onClose, onStart, onImport, api, onRefresh }: { profile: Profile; lastImport?: ImportRecord; onClose: () => void; onStart: () => void; onImport: () => void; notify: (s:string)=>void; api: WorkerApi; onRefresh: () => Promise<void> }) {
+  return <div className="drawer-layer"><button className="scrim" onClick={onClose}/><section className="drawer" style={{width:'min(620px,100%)'}}>
+    <div className="drawer-head"><div className="phone-avatar large"><Smartphone size={24}/></div><div><h2>{profile.name}</h2><span>{profile.id} · {profile.group} · {statusLabel[profile.status]}</span></div><button className="icon-button" onClick={onClose}><X size={20}/></button></div>
+    <div className="console-actions"><button className="primary" onClick={onStart}><Play size={17}/>Iniciar / conectar</button><button className="secondary" onClick={onImport}><Upload size={15}/>Dados portáveis</button></div>
+    {lastImport&&<p className="console-help">Pacote local: {lastImport.safeCookieCount} cookies e {lastImport.safeStorageCount} preferências · {lastImport.host}.</p>}
+    <DeviceConsole profile={profile} api={api} onRefresh={onRefresh}/>
   </section></div>
 }
-
 export default App

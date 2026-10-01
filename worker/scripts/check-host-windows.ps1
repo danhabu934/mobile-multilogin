@@ -1,3 +1,4 @@
+param([ValidateSet('emulator','external')][string]$Engine = 'emulator')
 $ErrorActionPreference = 'Stop'
 
 $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA 'Android\Sdk' }
@@ -7,6 +8,7 @@ $required = @(
   (Join-Path $sdkRoot 'cmdline-tools\latest\bin\avdmanager.bat')
 )
 
+if ($Engine -eq 'external') { $required = @((Join-Path $sdkRoot 'platform-tools\adb.exe')) }
 $failures = 0
 
 $bundledJava = Join-Path $env:ProgramFiles 'Android\Android Studio\jbr'
@@ -17,7 +19,7 @@ if (-not $env:JAVA_HOME -and (Test-Path (Join-Path $bundledJava 'bin\java.exe'))
 if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
   $env:Path = "$(Join-Path $env:JAVA_HOME 'bin');$env:Path"
   Write-Host "[ok] Java $env:JAVA_HOME" -ForegroundColor Green
-} else {
+} elseif ($Engine -eq 'emulator') {
   Write-Host '[missing] Java runtime (JAVA_HOME)' -ForegroundColor Red
   $failures++
 }
@@ -46,7 +48,7 @@ if ($node) {
 }
 
 $emulator = Join-Path $sdkRoot 'emulator\emulator.exe'
-if (Test-Path $emulator) {
+if ($Engine -eq 'emulator' -and (Test-Path $emulator)) {
   & $emulator -accel-check
   if ($LASTEXITCODE -eq 0) {
     Write-Host '[ok] Android Emulator hardware acceleration' -ForegroundColor Green
@@ -56,9 +58,17 @@ if (Test-Path $emulator) {
   }
 }
 
+if ($Engine -eq 'emulator') {
+  $imageRoot = Join-Path $sdkRoot 'system-images'
+  $installed = @(Get-ChildItem $imageRoot -Filter 'package.xml' -Recurse -ErrorAction SilentlyContinue)
+  if ($installed.Count -eq 0) { Write-Host '[missing] Android system image. Install in Android Studio SDK Manager.' -ForegroundColor Red; $failures++ }
+  $drive = Get-PSDrive -Name ([IO.Path]::GetPathRoot($sdkRoot).Substring(0,1)) -ErrorAction SilentlyContinue
+  if ($drive -and $drive.Free -lt 5GB) { Write-Host '[missing] At least 5 GB of free disk space.' -ForegroundColor Red; $failures++ }
+}
 if ($failures -gt 0) {
   Write-Host "Windows host is not ready: $failures requirement(s) missing." -ForegroundColor Red
-  exit 1
+  throw 'Host verification failed. Correct the missing requirements before setup.'
 }
 
 Write-Host 'Windows host is ready for the Android worker.' -ForegroundColor Green
+

@@ -41,3 +41,24 @@ As configurações de Azure e Google Cloud permanecem em `infra/` apenas como al
 - Criptografar segredos no backend antes de persistir.
 - Usar perfis somente para contas e dispositivos autorizados.
 - Não implementar contorno de autenticação, CAPTCHA ou proteções de plataforma.
+
+
+## Operações e compatibilidade (0.2)
+
+O painel agora envia configurações reais por perfil, preserva estados de boot/erros, conecta motores externos por ADB e oferece tela, toque, apps, logs e backup local completo do Android Emulator.
+
+Leia [compatibilidade, atualização no PowerShell e conexão BlueStacks](docs/runtime-compatibility.md) antes de atualizar. Vídeo/áudio usa janela nativa ou scrcpy; a tela do painel é uma prévia periódica. A execução de um app depende do motor, da imagem, dos serviços e dos requisitos do próprio app.
+
+Validação:
+
+```bash
+npm ci
+npm --prefix worker ci --ignore-scripts
+npm --prefix worker run verify:runtime
+npm --prefix worker test
+npm run build
+npx playwright install chromium
+npm run test:ui
+```
+
+O CI verifica frontend, worker em Linux/Windows, sintaxe PowerShell e fluxo de interface com navegador. A suite não instala nem testa InfinitePay/TikTok em um aparelho real.

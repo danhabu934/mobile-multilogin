@@ -1,9 +1,13 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { SerialQueue } from './queue.js'
+import { profileIdSchema } from './schemas.js'
 import type { AndroidProfile } from './types.js'
 
 export class ProfileStore {
+  private readonly queue = new SerialQueue()
+  readonly warnings: string[] = []
   private readonly key: Buffer
 
   constructor(private readonly profileDir: string, encryptionSecret: string) {
@@ -15,7 +19,7 @@ export class ProfileStore {
   }
 
   private file(id: string) {
-    return path.join(this.profileDir, `${id}.json`)
+    return path.join(this.profileDir, `${profileIdSchema.parse(id)}.json`)
   }
 
   async get(id: string): Promise<AndroidProfile | null> {
@@ -29,15 +33,36 @@ export class ProfileStore {
 
   async list(): Promise<AndroidProfile[]> {
     const files = (await fs.readdir(this.profileDir)).filter(file => file.endsWith('.json'))
-    const profiles = await Promise.all(files.map(file => fs.readFile(path.join(this.profileDir, file), 'utf8').then(value => this.decrypt(value))))
+    this.warnings.length = 0
+    const results = await Promise.allSettled(files.map(file => fs.readFile(path.join(this.profileDir, file), 'utf8').then(value => this.decrypt(value))))
+    const profiles: AndroidProfile[] = []
+    results.forEach((result, i) => {
+      if (result.status === 'fulfilled') profiles.push(result.value)
+      else this.warnings.push(`Perfil ${files[i]} não pôde ser lido. Verifique a chave e restaure seu backup; o arquivo foi preservado.`)
+    })
     return profiles.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   }
 
   async save(profile: AndroidProfile) {
-    const destination = this.file(profile.id)
-    const temporary = `${destination}.${process.pid}.tmp`
-    await fs.writeFile(temporary, `${JSON.stringify(this.encrypt(profile))}\n`, { mode: 0o600 })
-    await fs.rename(temporary, destination)
+    return this.queue.run(async () => {
+      const destination = this.file(profile.id)
+      const temporary = `${destination}.${crypto.randomUUID()}.tmp`
+      try {
+        const handle = await fs.open(temporary, 'wx', 0o600)
+        try { await handle.writeFile(`${JSON.stringify(this.encrypt(profile))}\n`); await handle.sync() } finally { await handle.close() }
+        await fs.rename(temporary, destination)
+      } finally { await fs.rm(temporary, { force: true }) }
+    })
+  }
+
+  async delete(id: string) {
+    return this.queue.run(() => fs.rm(this.file(id), { force: true }))
+  }
+
+  readBackup(serialized: string, id: string) {
+    const p = this.decrypt(serialized)
+    if (p.id !== id) throw new Error('Backup pertence a outro perfil')
+    return p
   }
 
   private encrypt(profile: AndroidProfile) {
@@ -53,6 +78,10 @@ export class ProfileStore {
     const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, Buffer.from(envelope.iv, 'base64'))
     decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
     const plaintext = Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, 'base64')), decipher.final()])
-    return JSON.parse(plaintext.toString('utf8')) as AndroidProfile
+    const profile = JSON.parse(plaintext.toString('utf8')) as AndroidProfile
+    profileIdSchema.parse(profile.id)
+    if (profile.avdName !== `nexo_${profile.id}`) throw new Error('Invalid AVD association')
+    return profile
   }
 }
+

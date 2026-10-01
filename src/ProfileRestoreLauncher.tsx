@@ -89,7 +89,7 @@ export default function ProfileRestoreLauncher() {
     <button
       type="button"
       onClick={() => setOpen(true)}
-      title="Sessão persistente e Profile Restore"
+      title="Dados portáveis do painel"
       style={{
         position:'fixed', right:22, bottom:22, zIndex:80, minHeight:44, padding:'0 16px',
         display:'flex', alignItems:'center', gap:9, border:'1px solid #2d5f89', borderRadius:12,
@@ -98,7 +98,7 @@ export default function ProfileRestoreLauncher() {
       }}
     >
       <DatabaseBackup size={18}/>
-      Sessão persistente
+      Dados portáveis
       {queueCount > 0 && <span style={{display:'inline-flex', alignItems:'center', gap:5, marginLeft:3, padding:'3px 7px', borderRadius:999, background:'#153c5f', color:'#8bc8ff'}}><RadioTower size={12}/>{queueCount}</span>}
     </button>
 
@@ -110,3 +110,4 @@ export default function ProfileRestoreLauncher() {
     />}
   </>
 }
+

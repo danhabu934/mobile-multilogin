@@ -18,7 +18,7 @@ test('creates, starts and stops an isolated profile in dry-run mode', async () =
     systemImage: 'system-images;android-35;google_apis_playstore;x86_64', deviceId: 'pixel_7_pro',
     platform: 'linux', headless: true, emulatorGpu: 'swiftshader_indirect', emulatorMemoryMb: 4096,
     emulatorCores: 4, emulatorHeapMb: 512, emulatorResolution: '720x1280', emulatorDensity: 320,
-    maxActiveEmulators: 1, dryRun: true,
+    maxActiveEmulators: 1, dryRun: true, coldBoot:true, bootTimeoutMs:180000, scrcpyPath:'scrcpy', blueStacksPlayer:'', uploadLimitMb:512,
   }
   const store = new ProfileStore(config.profileDir, config.encryptionKey)
   const manager = new AndroidManager(config, store)
@@ -43,3 +43,4 @@ test('creates, starts and stops an isolated profile in dry-run mode', async () =
   assert.equal(stored.includes('secret'), false)
   assert.equal(stored.includes('proxy.example'), false)
 })
+

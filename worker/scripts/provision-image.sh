@@ -2,7 +2,7 @@
 set -eu
 
 SDK_ROOT="${ANDROID_SDK_ROOT:-/opt/android-sdk}"
-SYSTEM_IMAGE="${ANDROID_SYSTEM_IMAGE:-system-images;android-34;google_apis_playstore;x86_64}"
+SYSTEM_IMAGE="${ANDROID_SYSTEM_IMAGE:-system-images;android-35;google_apis_playstore;x86_64}"
 SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
 if [ ! -x "$SDKMANAGER" ]; then
@@ -13,3 +13,4 @@ fi
 
 "$SDKMANAGER" "platform-tools" "emulator" "$SYSTEM_IMAGE"
 echo "Installed: $SYSTEM_IMAGE"
+
