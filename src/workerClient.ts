@@ -1,17 +1,17 @@
 export type WorkerApi = <T>(path: string, options?: RequestInit) => Promise<T>
 export function workerClient(url: string, token: string): WorkerApi {
   const parsed = new URL(url)
-  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Use um endereço HTTP/HTTPS sem credenciais na URL')
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error('Use um endereco HTTP/HTTPS sem credenciais na URL')
   return async <T>(path: string, options: RequestInit = {}): Promise<T> => {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), options.body instanceof File || /backups|restore/.test(path) ? 300000 : 20000)
+    const timeout = setTimeout(() => controller.abort(), options.body instanceof File || /backups|restore|hydrate/.test(path) ? 300000 : 20000)
     try {
       const response = await fetch(`${url.replace(/\/$/, '')}${path}`, { ...options, signal: controller.signal,
         headers: { ...(options.body instanceof File ? { 'Content-Type': 'application/vnd.android.package-archive' } : { 'Content-Type': 'application/json' }), Authorization: `Bearer ${token}`, ...options.headers } })
       if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(Array.isArray(body.details) ? body.details.map((d: {path?:string[];message:string})=>`${d.path?.join('.') || 'Dados'}: ${d.message}`).join('; ') : body.error ?? `Erro HTTP ${response.status}`) }
       if (response.headers.get('Content-Type')?.startsWith('image/')) return await response.blob() as T
       return await response.json() as T
-    } catch (e) { if (e instanceof DOMException && e.name === 'AbortError') throw new Error('Worker não respondeu no prazo. Consulte os logs antes de repetir a operação.'); throw e }
+    } catch (e) { if (e instanceof DOMException && e.name === 'AbortError') throw new Error('Worker nao respondeu no prazo. Consulte os logs antes de repetir a operacao.'); throw e }
     finally { clearTimeout(timeout) }
   }
 }
