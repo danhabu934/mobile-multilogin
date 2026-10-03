@@ -105,13 +105,21 @@ export function createApp(config: WorkerConfig, manager: AndroidManager) {
     }); res.json(values)
   })
   app.post('/v1/hydrate', async (req, res) => {
-    const input = z.object({ profileId: profileIdSchema, cookies: z.array(z.unknown()).min(1), serial: z.string().optional() }).parse(req.body)
+    const input = z.object({
+      profileId: profileIdSchema,
+      // Aceita array de cookies, objeto com .cookies, ou string bruta (JSON / Netscape / linhas)
+      cookies: z.union([z.array(z.unknown()).min(1), z.record(z.string(), z.unknown()), z.string().min(1)]),
+      serial: z.string().optional(),
+    }).parse(req.body)
     const result = await manager.deviceOperation(input.profileId, async p => {
       if (input.serial && input.serial !== manager.serial(p)) throw new Error('Serial não pertence ao perfil')
       const require = createRequire(import.meta.url)
-      const module = require(fileURLToPath(new URL('../dist/cookie-hydrator.cjs', import.meta.url))) as { hydrateSerialGuarded: (cookies: unknown[], opts: { serial: string }) => Promise<unknown> }
+      const module = require(fileURLToPath(new URL('../dist/cookie-hydrator.cjs', import.meta.url))) as {
+        hydrateSerialGuarded: (cookies: unknown, opts: { serial: string }) => Promise<unknown>
+      }
       return module.hydrateSerialGuarded(input.cookies, { serial: manager.serial(p) })
-    }); res.json(result)
+    })
+    res.json(result)
   })
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (error instanceof ZodError) return res.status(400).json({ error: 'Invalid request', details: error.issues })
