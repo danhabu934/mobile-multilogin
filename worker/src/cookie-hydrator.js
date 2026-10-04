@@ -2,7 +2,7 @@
  * worker/cookie-hydrator.js
  *
  * Raw cookie hydration into TikTok WebView SQLite via ADB + root.
- * Accepts JSON array/object, Netscape file, or name=value lines.
+ * Accepts JSON array/object (LZT Market), Netscape file, or name=value lines.
  * Dependencia: better-sqlite3
  */
 'use strict';
@@ -34,6 +34,10 @@ const crNow      = ()  => BigInt(Math.floor(Date.now() / 1000)) * 1_000_000n + C
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log   = (tag, msg) => console.log(`[${new Date().toISOString()}][${tag}] ${msg}`);
+
+const SESSION_MARKERS = [
+  'sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt', 'uid_tt_ss', 'sid_guard',
+];
 
 const adbArgs = (serial, ...args) => (serial ? ['-s', serial, ...args] : args);
 
@@ -166,19 +170,67 @@ function parseRawCookies(raw) {
   return lines.map((l, i) => parseCookieString(l, i));
 }
 
+function resolveHostKey(obj, name, i) {
+  const domainRaw = String(obj.domain ?? obj.host ?? '').trim().toLowerCase();
+  const hadLeadingDot = domainRaw.startsWith('.');
+  const domain = domainRaw.replace(/^\./, '').replace(/\.+$/, '');
+  if (!domain) throw new Error(`cookie #${i} (${name}): domain ausente`);
+  const hostOnly = hadLeadingDot ? false : Boolean(obj.hostOnly ?? obj.hostonly ?? false);
+  const hostKey = hostOnly ? domain : `.${domain}`;
+  return { domain, hostOnly, hostKey };
+}
+
+function analyzeSession(cookies) {
+  const names = new Set(cookies.map((c) => c.name.toLowerCase()));
+  const present = SESSION_MARKERS.filter((n) => names.has(n));
+  const hasSessionId = names.has('sessionid') || names.has('sessionid_ss');
+  const hasSidTt = names.has('sid_tt');
+  const hasUid = names.has('uid_tt') || names.has('uid_tt_ss');
+  const hasGuard = names.has('sid_guard');
+  const warnings = [];
+  if (!hasSessionId && !hasSidTt) {
+    warnings.push('Sem sessionid/sid_tt — login pode falhar ou cair ao doar. Peça cookies completos na LZT.');
+  }
+  if (!hasUid && hasSessionId) {
+    warnings.push('Sem uid_tt — sessão pode ficar instável em ações sensíveis.');
+  }
+  if (present.length === 0) {
+    warnings.push('Nenhum cookie de sessão TikTok reconhecido no payload.');
+  }
+  return { markersFound: present, hasSessionId, hasSidTt, hasUid, hasGuard, warnings };
+}
+
+function expandHostKeys(rows) {
+  const out = [];
+  const seen = new Set();
+  const keyOf = (c) => `${c.hostKey}\0${c.path}\0${c.name}`;
+  for (const c of rows) {
+    if (!seen.has(keyOf(c))) {
+      seen.add(keyOf(c));
+      out.push(c);
+    }
+    const bare = c.hostKey.replace(/^\./, '');
+    if (bare === 'tiktok.com' || bare === 'tiktokv.com' || bare.endsWith('.tiktok.com')) {
+      const altKey = c.hostKey.startsWith('.') ? bare : `.${bare}`;
+      const alt = { ...c, hostKey: altKey };
+      if (!seen.has(keyOf(alt))) {
+        seen.add(keyOf(alt));
+        out.push(alt);
+      }
+    }
+  }
+  return out;
+}
+
 function normalizeCookies(raw) {
   const list = parseRawCookies(raw);
   const nowCr = crNow();
-  return list.map((c, i) => {
+  const rows = list.map((c, i) => {
     const obj = typeof c === 'string' ? parseCookieString(c, i) : c;
     const name = String(obj?.name ?? '').trim();
     if (!name) throw new Error(`cookie #${i}: name ausente`);
     const value = obj.value != null ? String(obj.value) : '';
-    let domain = String(obj.domain ?? obj.host ?? '').trim().toLowerCase()
-      .replace(/^\./, '').replace(/\.+$/, '');
-    if (!domain) throw new Error(`cookie #${i} (${name}): domain ausente`);
-    const hostOnly = obj.hostOnly ?? obj.hostonly ?? false;
-    const hostKey = hostOnly ? domain : `.${domain}`;
+    const { hostKey } = resolveHostKey(obj, name, i);
     const exp = Number(obj.expirationDate ?? obj.expires ?? 0);
     const hasExp = Number.isFinite(exp) && exp > 0;
     const samesite = typeof obj.sameSite === 'number' || typeof obj.samesite === 'number'
@@ -189,12 +241,13 @@ function normalizeCookies(raw) {
       path: String(obj.path ?? '/').trim() || '/',
       secure: obj.secure != null ? Boolean(obj.secure) : true,
       httpOnly: Boolean(obj.httpOnly ?? obj.httponly ?? false),
-      hasExpires: hasExp ? 1 : 0,
-      isPersistent: hasExp ? 1 : 0,
-      expiresCr: hasExp ? crFromUnix(exp) : 0n,
+      hasExpires: 1,
+      isPersistent: 1,
+      expiresCr: hasExp ? crFromUnix(exp) : crFromUnix(2147483647),
       samesite, createdCr: nowCr, lastAccessedCr: nowCr,
     };
   });
+  return expandHostKeys(rows);
 }
 
 const COOKIE_SCHEMA = `
@@ -228,7 +281,7 @@ function buildCookiesDb(cookies, file) {
     encrypted_name, encrypted_value_type
   ) VALUES (
     @createdCr, @hostKey, @name, @value, @path, @expiresCr, @secure, @httpOnly,
-    @lastAccessedCr, @hasExpires, @isPersistent, 1, @samesite, 0, -1, 0,
+    @lastAccessedCr, @hasExpires, @isPersistent, 1, @samesite, 2, 443, 0,
     @lastAccessedCr, 0, 0, X'', 0, X'', 0
   )`);
   const tx = db.transaction((rows) => {
@@ -256,16 +309,19 @@ DIR='${WEBVIEW_DIR}'
 NEW='${STAGED_DB}'
 TS=$(date +%s 2>/dev/null || echo 0)
 am force-stop "$PKG" 2>/dev/null || true
-sleep 1
+sleep 2
+mkdir -p "$DIR" 2>/dev/null || true
 if [ -f "$DIR/Cookies" ]; then
   mkdir -p '${BACKUP_DIR}'
   cp -f "$DIR/Cookies" '${BACKUP_DIR}/Cookies.bak_$TS' 2>/dev/null || true
 fi
 rm -f "$DIR/Cookies-journal" "$DIR/Cookies-wal" "$DIR/Cookies-shm" 2>/dev/null || true
+rm -f "$DIR/Network Persistent State" 2>/dev/null || true
 cp -f "$NEW" "$DIR/Cookies"
-UID_APP=$(stat -c '%u' "$DIR" 2>/dev/null || echo 1000)
-GID_APP=$(stat -c '%g' "$DIR" 2>/dev/null || echo 1000)
-chown "$UID_APP:$GID_APP" "$DIR/Cookies" 2>/dev/null || true
+UID_APP=$(stat -c '%u' "/data/data/$PKG" 2>/dev/null || echo 1000)
+GID_APP=$(stat -c '%g' "/data/data/$PKG" 2>/dev/null || echo 1000)
+chown "$UID_APP:$GID_APP" "$DIR" "$DIR/Cookies" 2>/dev/null || true
+chmod 700 "$DIR" 2>/dev/null || true
 chmod 660 "$DIR/Cookies" 2>/dev/null || true
 chcon u:object_r:app_data_file:s0 "$DIR/Cookies" 2>/dev/null || true
 sync
@@ -287,11 +343,20 @@ async function hydrateCookies(rawCookies, opts = {}) {
   const serial = opts.serial ?? process.env.ADB_SERIAL;
   const tag = serial ?? 'default';
   const cookies = normalizeCookies(rawCookies);
-  log(tag, `payload valido: ${cookies.length} cookie(s)`);
+  const session = analyzeSession(cookies);
+  log(tag, `payload valido: ${cookies.length} cookie(s); markers=${session.markersFound.join(',') || 'none'}`);
+  for (const w of session.warnings) log(tag, `aviso: ${w}`);
   await assertRoot(serial, tag);
+  try {
+    const { out: pm } = await shell(serial, `pm path ${PKG}`);
+    if (!/package:/.test(pm)) throw new Error(`TikTok (${PKG}) nao instalado neste aparelho`);
+  } catch (e) {
+    if (String(e.message).includes('nao instalado')) throw e;
+    throw new Error(`TikTok (${PKG}) nao instalado neste aparelho`);
+  }
   await shell(serial, `am force-stop ${PKG}`);
   log(tag, 'am force-stop');
-  await sleep(1500);
+  await sleep(2000);
   const localDb = path.join(os.tmpdir(), `musically_cookies_${process.pid}_${Date.now()}.db`);
   const count = buildCookiesDb(cookies, localDb);
   const localSum = await sha256File(localDb);
@@ -310,12 +375,13 @@ async function hydrateCookies(rawCookies, opts = {}) {
     if (remoteSum !== localSum) throw new Error(`sha256 divergente local=${localSum} device=${remoteSum}`);
     log(tag, 'hash ok');
     const comp = await resolveLauncher(serial);
+    const base = { ok: true, serial: tag, cookies: count, session, warnings: session.warnings };
     if (comp) {
       await shell(serial, `am start -n ${comp}`);
-      return { ok: true, serial: tag, cookies: count, launcher: comp };
+      return { ...base, launcher: comp };
     }
     await shell(serial, `monkey -p ${PKG} -c android.intent.category.LAUNCHER 1`);
-    return { ok: true, serial: tag, cookies: count, launcher: '(monkey)' };
+    return { ...base, launcher: '(monkey)' };
   } finally {
     await shell(serial, `rm -f ${STAGED_DB} ${STAGED_SH}`).catch(() => {});
     await fsp.rm(localDb, { force: true }).catch(() => {});
@@ -349,4 +415,11 @@ if (require.main === module) {
   main().catch((e) => { console.error('FALHA:', e.message); process.exit(1); });
 }
 
-module.exports = { hydrateCookies, hydrateSerialGuarded, normalizeCookies, parseRawCookies, PKG };
+module.exports = {
+  hydrateCookies,
+  hydrateSerialGuarded,
+  normalizeCookies,
+  parseRawCookies,
+  analyzeSession,
+  PKG,
+};
