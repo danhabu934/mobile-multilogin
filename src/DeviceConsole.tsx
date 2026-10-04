@@ -35,31 +35,38 @@ export default function DeviceConsole({ profile, api, onRefresh }: { profile: De
   const loadApps = () => act(async () => setApps((await api<{ apps: string[] }>(`${prefix}/apps`)).apps))
   const loadBackups = async () => setBackups((await api<{ backups: string[] }>(`${prefix}/backups`)).backups)
   const cookieLines = cookiePaste.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
-  const cookieCount = (() => {
+  const cookieMeta = (() => {
     const t = cookiePaste.trim()
-    if (!t) return 0
+    if (!t) return { count: 0, markers: [] as string[], warn: '' }
     try {
       if (t.startsWith('[') || t.startsWith('{')) {
         const p = JSON.parse(t) as unknown
-        if (Array.isArray(p)) return p.length
-        if (p && typeof p === 'object') {
+        let arr: unknown[] = []
+        if (Array.isArray(p)) arr = p
+        else if (p && typeof p === 'object') {
           const o = p as Record<string, unknown>
-          for (const c of [o.cookies, (o.data as {cookies?:unknown})?.cookies]) if (Array.isArray(c)) return c.length
+          for (const c of [o.cookies, (o.data as { cookies?: unknown })?.cookies]) if (Array.isArray(c)) arr = c
         }
-        return 0
+        const names = arr.map(x => String((x as { name?: string })?.name ?? '').toLowerCase()).filter(Boolean)
+        const markers = ['sessionid', 'sessionid_ss', 'sid_tt', 'uid_tt', 'sid_guard'].filter(n => names.includes(n))
+        const warn = !markers.includes('sessionid') && !markers.includes('sessionid_ss') && !markers.includes('sid_tt')
+          ? 'Sem sessionid/sid_tt no JSON — risco alto de deslogar ao doar.'
+          : ''
+        return { count: arr.length, markers, warn }
       }
-    } catch { return 0 }
+    } catch { return { count: 0, markers: [] as string[], warn: 'JSON inválido' } }
     const ns = cookieLines.filter(l => l.split('\t').length >= 7)
-    return ns.length || cookieLines.length
+    return { count: ns.length || cookieLines.length, markers: [] as string[], warn: '' }
   })()
   const hydrateAccount = () => act(async () => {
     if (!cookiePaste.trim()) throw new Error('Cole os cookies da sessão antes de hidratar.')
     if (profile.status !== 'running') throw new Error('Inicie o Android e aguarde Em execução antes de hidratar.')
-    const result = await api<{ ok?: boolean; cookies?: number; launcher?: string }>('/v1/hydrate', {
+    const result = await api<{ ok?: boolean; cookies?: number; launcher?: string; warnings?: string[] }>('/v1/hydrate', {
       method: 'POST',
       body: JSON.stringify({ profileId: profile.id, cookies: cookiePaste }),
     })
-    setMessage(`Conta hidratada: ${result.cookies ?? cookieCount} cookie(s) no TikTok${result.launcher ? ` · ${result.launcher}` : ''}.`)
+    const warn = (result.warnings && result.warnings.length) ? ` ⚠ ${result.warnings.join(' ')}` : ''
+    setMessage(`Conta hidratada: ${result.cookies ?? cookieMeta.count} cookie(s) no TikTok${result.launcher ? ` · ${result.launcher}` : ''}.${warn}`)
   }, '')
   return <div className="device-console">
     <div className="console-tabs">{[['screen','Tela'],['session','Sessão'],['apps','Apps'],['diagnostics','Diagnóstico'],['settings','Configuração'],['backups','Backups']].map(([key,label]) => <button key={key} className={tab === key ? 'primary' : 'secondary'} onClick={() => { setTab(key); setError(''); setMessage('') }}>{label}</button>)}</div>
@@ -72,15 +79,16 @@ export default function DeviceConsole({ profile, api, onRefresh }: { profile: De
       <label className="console-label">Abrir no Android<input value={url} onChange={e => setUrl(e.target.value)}/></label><button className="secondary" disabled={busy || profile.status !== 'running'} onClick={() => void act(() => api(`${prefix}/open-url`, { method:'POST', body:JSON.stringify({url}) }), 'URL enviada ao Android.')}>Abrir site / Play Store</button>
     </>}
     {tab === 'session' && <>
-      <p className="console-help">Hidratação TikTok (LZT / cookies brutos). JSON, Netscape ou linhas name=value. Aparelho em execução, TikTok instalado e root (su 0).</p>
-      <label className="console-label">Cookies da sessão<textarea value={cookiePaste} onChange={e => setCookiePaste(e.target.value)} placeholder={'JSON LZT, DevTools, Netscape ou linhas name=value'} style={{minHeight:180, resize:'vertical', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:11, padding:12, background:'#0d1b2b', color:'#d2dfec', border:'1px solid #263b51', borderRadius:8}}/></label>
-      <p className="console-help">{cookieCount ? `${cookieCount} cookie(s) detectados` : 'Cole os cookies para habilitar Hidratar Conta'}</p>
+      <p className="console-help">LZT Market: copie o bloco JSON de Cookies e cole abaixo. Aparelho em execução, TikTok instalado, root (su 0). Use o mesmo perfil para a mesma conta (persistência).</p>
+      <label className="console-label">Cookies da sessão (JSON LZT)<textarea value={cookiePaste} onChange={e => setCookiePaste(e.target.value)} placeholder={'[{"domain":".tiktok.com","name":"sessionid","value":"..."}, ...]'} style={{minHeight:180, resize:'vertical', fontFamily:'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize:11, padding:12, background:'#0d1b2b', color:'#d2dfec', border:'1px solid #263b51', borderRadius:8}}/></label>
+      <p className="console-help">{cookieMeta.count ? `${cookieMeta.count} cookie(s)${cookieMeta.markers.length ? ` · sessão: ${cookieMeta.markers.join(', ')}` : ''}` : 'Cole o JSON da LZT para habilitar Hidratar Conta'}</p>
+      {cookieMeta.warn && <p className="console-error">{cookieMeta.warn}</p>}
       <div className="console-actions">
-        <button className="primary" disabled={busy || profile.status !== 'running' || cookieCount === 0} onClick={() => { if (window.confirm('Injetar cookies no TikTok deste aparelho?')) void hydrateAccount() }}>Hidratar Conta</button>
+        <button className="primary" disabled={busy || profile.status !== 'running' || cookieMeta.count === 0} onClick={() => { if (window.confirm('Injetar cookies no TikTok deste aparelho? (app será reiniciado)')) void hydrateAccount() }}>Hidratar Conta</button>
         <button className="secondary" disabled={busy || !cookiePaste} onClick={() => setCookiePaste('')}>Limpar</button>
         <button className="secondary" disabled={busy || profile.status !== 'running'} onClick={() => void act(() => api(`${prefix}/apps/com.zhiliaoapp.musically/open`, { method: 'POST' }), 'TikTok aberto.')}>Abrir TikTok</button>
       </div>
-      <p className="console-help">Fluxo: iniciar perfil → colar cookies → Hidratar Conta. Cookies não são gravados no painel.</p>
+      <p className="console-help">Fluxo: iniciar perfil → instalar TikTok → colar JSON LZT → Hidratar Conta → testar doação. Cookies não ficam salvos no painel.</p>
     </>}
     {tab === 'apps' && <>
       <div className="console-actions"><button className="secondary" disabled={busy} onClick={() => void loadApps()}>Atualizar aplicativos</button><button className="secondary" disabled={busy} onClick={()=>void act(()=>api(`${prefix}/apps/com.android.vending/open`,{method:'POST'}))}>Abrir Play Store</button><label className="secondary">Instalar APK<input type="file" accept=".apk" disabled={busy} style={{display:'none'}} onChange={e => { const file=e.target.files?.[0]; if(file) void act(async () => { await api(`${prefix}/apk`, {method:'POST',body:file}); setApps((await api<{apps:string[]}>(`${prefix}/apps`)).apps) }, 'APK instalado.'); e.target.value='' }}/></label></div>
