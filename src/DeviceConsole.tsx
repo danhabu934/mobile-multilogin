@@ -61,9 +61,21 @@ export default function DeviceConsole({ profile, api, onRefresh }: { profile: De
   const hydrateAccount = () => act(async () => {
     if (!cookiePaste.trim()) throw new Error('Cole os cookies da sessão antes de hidratar.')
     if (profile.status !== 'running') throw new Error('Inicie o Android e aguarde Em execução antes de hidratar.')
+    // Prefer array payload so older workers (array-only zod) accept LZT JSON paste
+    let cookiesPayload: unknown = cookiePaste.trim()
+    try {
+      const p = JSON.parse(cookiePaste) as unknown
+      if (Array.isArray(p)) cookiesPayload = p
+      else if (p && typeof p === 'object') {
+        const o = p as Record<string, unknown>
+        for (const c of [o.cookies, (o.data as { cookies?: unknown })?.cookies]) {
+          if (Array.isArray(c)) { cookiesPayload = c; break }
+        }
+      }
+    } catch { /* Netscape / raw lines stay as string */ }
     const result = await api<{ ok?: boolean; cookies?: number; launcher?: string; warnings?: string[] }>('/v1/hydrate', {
       method: 'POST',
-      body: JSON.stringify({ profileId: profile.id, cookies: cookiePaste }),
+      body: JSON.stringify({ profileId: profile.id, cookies: cookiesPayload }),
     })
     const warn = (result.warnings && result.warnings.length) ? ` ⚠ ${result.warnings.join(' ')}` : ''
     setMessage(`Conta hidratada: ${result.cookies ?? cookieMeta.count} cookie(s) no TikTok${result.launcher ? ` · ${result.launcher}` : ''}.${warn}`)
