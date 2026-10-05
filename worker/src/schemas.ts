@@ -20,12 +20,28 @@ export const createProfileSchema = z.object({
   deviceId: z.string().regex(/^[a-zA-Z0-9_-]+$/).max(80).optional(), settings: settingsSchema.optional(),
   serial: z.string().regex(/^(?:127\.0\.0\.1:\d{1,5}|[a-zA-Z0-9_-]{3,100})$/).optional(),
   instanceName: z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/).optional(),
+  purpose: z.enum(['general', 'referral']).default('general'),
 }).superRefine((p, ctx) => {
   if (p.engine !== 'android-emulator' && !p.serial) ctx.addIssue({ code: 'custom', message: 'Selecione um dispositivo ADB existente' })
-  if (p.engine !== 'android-emulator' && p.proxy.type !== 'none') ctx.addIssue({ code: 'custom', message: 'Configure a rede no motor externo; o Nexo não aplica proxy a este dispositivo' })
-  if (p.proxy.type === 'socks5' || p.proxy.type === 'https') ctx.addIssue({ code: 'custom', message: 'Este motor suporta proxy HTTP. SOCKS5 e TLS para o proxy exigem um túnel separado' })
+  if (p.engine !== 'android-emulator' && p.proxy.type !== 'none') ctx.addIssue({ code: 'custom', message: 'Configure a rede no motor externo; o Nexo n\u00e3o aplica proxy a este dispositivo' })
+  if (p.proxy.type === 'socks5' || p.proxy.type === 'https') ctx.addIssue({ code: 'custom', message: 'Este motor suporta proxy HTTP. SOCKS5 e TLS para o proxy exigem um t\u00fanel separado' })
+  if (p.purpose === 'referral') {
+    if (p.proxy.type === 'none' || !p.proxy.host || !p.proxy.port) {
+      ctx.addIssue({ code: 'custom', message: 'Conta de indica\u00e7\u00e3o exige proxy HTTP com host e porta (IP isolado por perfil)' })
+    }
+    if (p.proxy.type !== 'none' && p.proxy.type !== 'http') {
+      ctx.addIssue({ code: 'custom', message: 'Conta de indica\u00e7\u00e3o: use proxy HTTP (ou t\u00fanel local apontando para HTTP)' })
+    }
+  }
 })
-export const updateProfileSchema = z.object({ displayName: z.string().trim().min(2).max(80).optional(), group: z.string().max(80).optional(), notes: z.string().max(1000).optional(), settings: settingsSchema.optional(), proxy: proxySchema.optional() })
+export const updateProfileSchema = z.object({
+  displayName: z.string().trim().min(2).max(80).optional(), group: z.string().max(80).optional(), notes: z.string().max(1000).optional(),
+  settings: settingsSchema.optional(), proxy: proxySchema.optional(), purpose: z.enum(['general', 'referral']).optional(),
+}).superRefine((p, ctx) => {
+  if (p.purpose === 'referral' && p.proxy && (p.proxy.type === 'none' || !p.proxy.host || !p.proxy.port)) {
+    ctx.addIssue({ code: 'custom', message: 'Conta de indica\u00e7\u00e3o exige proxy HTTP configurado' })
+  }
+})
 export const packageSchema = z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)+$/).max(200)
 export const inputSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('tap'), x: z.number().int().min(0).max(10000), y: z.number().int().min(0).max(10000) }),
